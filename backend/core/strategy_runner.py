@@ -1,0 +1,226 @@
+"""
+策略调度器
+管理所有策略实例的生命周期：启动、停止、定时扫描
+"""
+import asyncio
+import json
+import time
+
+from exchange.okx_client import OKXClient
+from db.database import get_db
+from strategies.registry import get_strategy
+from core.trade_executor import TradeExecutor
+from ws import ws_manager
+from utils.logger import get_logger
+
+logger = get_logger("StrategyRunner")
+
+
+class StrategyRunner:
+    """策略调度器 — 管理所有策略实例的运行"""
+
+    def __init__(self, client: OKXClient):
+        self.client = client
+        self.executor = TradeExecutor(client)
+        self.tasks: dict[str, asyncio.Task] = {}
+        self._running = False
+        # 仓位互斥锁: symbol -> strategy_id
+        self._symbol_locks: dict[str, str] = {}
+
+    async def start(self):
+        """启动所有激活策略"""
+        self._running = True
+        db = await get_db()
+        cursor = await db.execute("SELECT * FROM strategies WHERE is_active = 1")
+        rows = await cursor.fetchall()
+
+        for row in rows:
+            strategy_id = row["id"]
+            await self._start_task(strategy_id)
+
+        logger.info(f"策略调度器已启动，运行中策略: {len(self.tasks)}")
+
+    async def stop(self):
+        """停止所有策略"""
+        self._running = False
+        for task in self.tasks.values():
+            task.cancel()
+        self.tasks.clear()
+        logger.info("策略调度器已停止")
+
+    async def start_strategy(self, strategy_id: str):
+        """启动单个策略"""
+        if strategy_id in self.tasks:
+            logger.warning(f"策略 {strategy_id} 已在运行中")
+            return
+        await self._start_task(strategy_id)
+
+    async def stop_strategy(self, strategy_id: str):
+        """停止单个策略"""
+        if strategy_id in self.tasks:
+            self.tasks[strategy_id].cancel()
+            del self.tasks[strategy_id]
+            # 释放该策略锁定的所有 symbol
+            self._symbol_locks = {
+                s: sid for s, sid in self._symbol_locks.items() if sid != strategy_id
+            }
+            logger.info(f"策略 {strategy_id} 已停止")
+
+    async def _start_task(self, strategy_id: str):
+        """创建并启动策略扫描任务"""
+        task = asyncio.create_task(self._scan_loop(strategy_id))
+        self.tasks[strategy_id] = task
+        logger.info(f"策略 {strategy_id} 已启动")
+
+    async def _scan_loop(self, strategy_id: str):
+        """单个策略的扫描循环"""
+        try:
+            while self._running:
+                try:
+                    await self._scan_once(strategy_id)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logger.error(f"策略 {strategy_id} 扫描异常: {e}")
+                    await ws_manager.broadcast("error", {
+                        "strategy_id": strategy_id,
+                        "message": str(e),
+                    })
+
+                # 从数据库读取 poll_interval
+                db = await get_db()
+                cursor = await db.execute(
+                    "SELECT poll_interval FROM strategies WHERE id = ?", (strategy_id,)
+                )
+                row = await cursor.fetchone()
+                interval = row["poll_interval"] if row else 5
+                await asyncio.sleep(interval)
+        except asyncio.CancelledError:
+            logger.info(f"策略 {strategy_id} 扫描循环已取消")
+
+    async def _scan_once(self, strategy_id: str):
+        """执行一次策略扫描"""
+        db = await get_db()
+        cursor = await db.execute("SELECT * FROM strategies WHERE id = ?", (strategy_id,))
+        row = await cursor.fetchone()
+        if not row or not row["is_active"]:
+            return
+
+        strategy_type = row["strategy_type"]
+        symbols = json.loads(row["symbols"])
+        decision_mode = row["decision_mode"]
+        params = json.loads(row["params"])
+        leverage = row["leverage"]
+        order_amount = row["order_amount_usdt"]
+        mgn_mode = row["mgn_mode"]
+
+        strategy = get_strategy(strategy_type)
+        if not strategy:
+            logger.error(f"策略类型未注册: {strategy_type}")
+            return
+
+        for symbol in symbols:
+            # 仓位互斥检查
+            if symbol in self._symbol_locks and self._symbol_locks[symbol] != strategy_id:
+                continue
+
+            # 检查是否已有持仓
+            positions = self.client.get_positions(inst_id=symbol)
+            if positions:
+                continue
+
+            try:
+                # 获取 K 线
+                df = self.client.get_candles(symbol, bar="1m", limit=500)
+                if df.empty or len(df) < 200:
+                    continue
+
+                signal = None
+
+                if decision_mode == "ai":
+                    # AI 决策模式
+                    signal = await self._ai_decide(strategy, df, params, row, symbol)
+                else:
+                    # 纯技术指标决策
+                    signal = strategy.check_signal(df, params)
+
+                if signal:
+                    logger.info(f"📡 信号检测 | {symbol} | {signal['reason']}")
+
+                    # 广播信号
+                    await ws_manager.broadcast("signal", {
+                        "strategy_id": strategy_id,
+                        "symbol": symbol,
+                        "signal": signal,
+                        "time": time.strftime("%H:%M:%S"),
+                    })
+
+                    # 执行交易
+                    await self.executor.execute(
+                        strategy_id=strategy_id,
+                        symbol=symbol,
+                        signal=signal,
+                        leverage=leverage,
+                        order_amount=order_amount,
+                        mgn_mode=mgn_mode,
+                    )
+
+                    # 锁定 symbol
+                    self._symbol_locks[symbol] = strategy_id
+
+            except Exception as e:
+                logger.error(f"扫描 {symbol} 异常: {e}")
+
+    async def _ai_decide(self, strategy, df, params, row, symbol) -> dict | None:
+        """AI 决策模式"""
+        try:
+            from ai.analyzer import AIAnalyzer
+            analyzer = AIAnalyzer()
+
+            indicators = strategy.compute_indicators(df, params)
+            ai_prompt = row["ai_prompt"] or ""
+            min_confidence = row["ai_min_confidence"]
+
+            result = await analyzer.analyze(
+                symbol=symbol,
+                indicators=indicators,
+                strategy_name=strategy.name,
+                custom_prompt=ai_prompt,
+            )
+
+            if not result:
+                return None
+
+            direction = result.get("direction", "idle").lower()
+            confidence = result.get("confidence", 0)
+            reasoning = result.get("reasoning", "")
+
+            logger.info(
+                f"🤖 AI 分析 | {symbol} | 方向: {direction} | "
+                f"置信度: {confidence}% | 理由: {reasoning[:50]}"
+            )
+
+            if direction == "idle" or confidence < min_confidence:
+                return None
+
+            # 使用策略计算止盈止损
+            closes = df["close"].values
+            price = closes[-1]
+            atr_pct = params.get("fixed_tp", 1.4)
+            if direction == "short":
+                tp_price = price * (1 - atr_pct / 100)
+                sl_price = price * (1 + atr_pct * 0.7 / 100)
+            else:
+                tp_price = price * (1 + atr_pct / 100)
+                sl_price = price * (1 - atr_pct * 0.7 / 100)
+
+            return {
+                "direction": direction,
+                "price": round(price, 2),
+                "tp_price": round(tp_price, 2),
+                "sl_price": round(sl_price, 2),
+                "reason": f"🤖 AI {direction.upper()} | 置信度 {confidence}% | {reasoning[:30]}",
+            }
+        except Exception as e:
+            logger.error(f"AI 决策失败: {e}")
+            return None
