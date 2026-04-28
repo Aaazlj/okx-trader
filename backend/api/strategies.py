@@ -142,3 +142,86 @@ async def stop_strategy(strategy_id: str):
     await ws_manager.broadcast("strategy_status", {"id": strategy_id, "is_active": False})
 
     return {"message": f"策略 {strategy_id} 已暂停", "is_active": False}
+
+
+@router.get("/{strategy_id}/positions")
+async def get_strategy_positions(strategy_id: str):
+    """获取策略关联的持仓（含最高/最低盈亏）"""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM positions WHERE strategy_id = ?", (strategy_id,)
+    )
+    rows = await cursor.fetchall()
+    return [dict(row) for row in rows]
+
+
+@router.get("/{strategy_id}/signals")
+async def get_strategy_signals(strategy_id: str, limit: int = 200):
+    """获取策略最近的信号/AI分析记录"""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM strategy_signals WHERE strategy_id = ? ORDER BY created_at DESC LIMIT ?",
+        (strategy_id, limit),
+    )
+    rows = await cursor.fetchall()
+    result = []
+    for row in rows:
+        d = dict(row)
+        # indicators 是 JSON 字符串
+        if d.get("indicators"):
+            try:
+                d["indicators"] = json.loads(d["indicators"])
+            except (json.JSONDecodeError, TypeError):
+                pass
+        result.append(d)
+    return result
+
+
+@router.get("/{strategy_id}/pnl")
+async def get_strategy_pnl(strategy_id: str):
+    """获取策略收益曲线数据"""
+    db = await get_db()
+    cursor = await db.execute(
+        """SELECT entry_time, exit_time, pnl, peak_pnl, trough_pnl, symbol, direction
+           FROM trades WHERE strategy_id = ? ORDER BY entry_time ASC""",
+        (strategy_id,),
+    )
+    rows = await cursor.fetchall()
+
+    points = []
+    cumulative = 0.0
+    total_wins = 0
+    total_losses = 0
+    max_drawdown = 0.0
+    peak_equity = 0.0
+
+    for row in rows:
+        trade_pnl = row["pnl"] or 0
+        cumulative += trade_pnl
+        peak_equity = max(peak_equity, cumulative)
+        drawdown = cumulative - peak_equity
+        max_drawdown = min(max_drawdown, drawdown)
+
+        if trade_pnl > 0:
+            total_wins += 1
+        elif trade_pnl < 0:
+            total_losses += 1
+
+        points.append({
+            "time": row["exit_time"] or row["entry_time"],
+            "pnl": round(cumulative, 4),
+            "trade_pnl": round(trade_pnl, 4),
+            "symbol": row["symbol"],
+            "direction": row["direction"],
+            "peak_pnl": row["peak_pnl"] or 0,
+            "trough_pnl": row["trough_pnl"] or 0,
+        })
+
+    total = total_wins + total_losses
+    return {
+        "points": points,
+        "total_pnl": round(cumulative, 4),
+        "total_trades": len(rows),
+        "win_rate": round(total_wins / total * 100, 1) if total > 0 else 0,
+        "max_drawdown": round(max_drawdown, 4),
+    }

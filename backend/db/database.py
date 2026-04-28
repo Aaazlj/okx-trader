@@ -36,6 +36,15 @@ async def close_db():
         logger.info("数据库连接已关闭")
 
 
+async def _ensure_column(db: aiosqlite.Connection, table: str, column: str, col_type: str):
+    """安全添加列（已存在则跳过）"""
+    try:
+        await db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type}")
+        await db.commit()
+    except Exception:
+        pass  # 列已存在
+
+
 async def _init_tables(db: aiosqlite.Connection):
     """初始化表结构"""
     await db.executescript("""
@@ -72,6 +81,8 @@ async def _init_tables(db: aiosqlite.Connection):
             fee REAL,
             status TEXT DEFAULT 'open',
             reason TEXT,
+            peak_pnl REAL DEFAULT 0,
+            trough_pnl REAL DEFAULT 0,
             entry_time TEXT DEFAULT (datetime('now')),
             exit_time TEXT,
             FOREIGN KEY (strategy_id) REFERENCES strategies(id)
@@ -88,11 +99,33 @@ async def _init_tables(db: aiosqlite.Connection):
             sl_price REAL,
             order_id TEXT,
             algo_id TEXT,
+            peak_pnl REAL DEFAULT 0,
+            trough_pnl REAL DEFAULT 0,
             open_time TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS strategy_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            direction TEXT,
+            confidence INTEGER,
+            reasoning TEXT,
+            indicators TEXT,
+            decision_mode TEXT,
+            result TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (strategy_id) REFERENCES strategies(id)
         );
     """)
     await db.commit()
+
+    # 兼容旧库：给 trades 表补充 peak_pnl/trough_pnl 列
+    await _ensure_column(db, "trades", "peak_pnl", "REAL DEFAULT 0")
+    await _ensure_column(db, "trades", "trough_pnl", "REAL DEFAULT 0")
+    await _ensure_column(db, "positions", "peak_pnl", "REAL DEFAULT 0")
+    await _ensure_column(db, "positions", "trough_pnl", "REAL DEFAULT 0")
 
     # 预置默认策略（如果不存在）
     cursor = await db.execute("SELECT COUNT(*) FROM strategies")

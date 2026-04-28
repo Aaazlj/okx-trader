@@ -22,6 +22,12 @@ export const updateStrategy = (id: string, data: any) => api.patch(`/strategies/
 export const startStrategy = (id: string) => api.post(`/strategies/${id}/start`)
 export const stopStrategy = (id: string) => api.post(`/strategies/${id}/stop`)
 
+// 策略详情相关
+export const getStrategyPositions = (id: string) => api.get(`/strategies/${id}/positions`)
+export const getStrategySignals = (id: string, limit = 200) =>
+  api.get(`/strategies/${id}/signals`, { params: { limit } })
+export const getStrategyPnl = (id: string) => api.get(`/strategies/${id}/pnl`)
+
 // ═══════════════════════════════════════════
 // 市场
 // ═══════════════════════════════════════════

@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue'
+import { onMounted, onUnmounted, computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useTradingStore } from './stores/trading'
-import Dashboard from './views/Dashboard.vue'
 
 const store = useTradingStore()
+const route = useRoute()
+const router = useRouter()
+
+const isDetailPage = computed(() => route.name === 'strategy-detail')
 
 onMounted(() => {
   document.documentElement.classList.add('dark')
@@ -16,13 +20,26 @@ onMounted(() => {
     store.disconnectWS()
   })
 })
+
+function goBack() {
+  router.push('/')
+}
 </script>
 
 <template>
   <div id="app">
     <header class="app-header">
-      <div class="logo">
-        <h1>⚡ OKX 自动交易系统</h1>
+      <div class="logo" style="display: flex; align-items: center; gap: 12px">
+        <el-button
+          v-if="isDetailPage"
+          size="small"
+          circle
+          @click="goBack"
+          style="margin-right: 4px"
+        >
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
+        <h1 @click="goBack" style="cursor: pointer">⚡ OKX 自动交易系统</h1>
       </div>
       <div style="display: flex; align-items: center; gap: 12px">
         <span
@@ -39,6 +56,6 @@ onMounted(() => {
         </span>
       </div>
     </header>
-    <Dashboard />
+    <router-view />
   </div>
 </template>

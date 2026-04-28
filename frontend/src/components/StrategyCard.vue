@@ -1,14 +1,20 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { startStrategy, stopStrategy, updateStrategy, getSymbols } from '../api'
 import { useTradingStore, type Strategy } from '../stores/trading'
 
 const props = defineProps<{ strategy: Strategy }>()
 const store = useTradingStore()
+const router = useRouter()
 
 const toggling = ref(false)
 const showConfig = ref(false)
+
+function goToDetail() {
+  router.push(`/strategy/${props.strategy.id}`)
+}
 
 // 编辑表单
 const editForm = ref({
@@ -77,7 +83,7 @@ async function loadSymbols() {
 </script>
 
 <template>
-  <div class="strategy-card" :class="{ active: strategy.is_active }">
+  <div class="strategy-card" :class="{ active: strategy.is_active }" @click="goToDetail" style="cursor: pointer">
     <div class="card-top">
       <div>
         <span class="status-dot" :class="strategy.is_active ? 'running' : 'stopped'" />
@@ -88,11 +94,11 @@ async function loadSymbols() {
           size="small"
           :type="strategy.is_active ? 'danger' : 'success'"
           :loading="toggling"
-          @click="toggleActive"
+          @click.stop="toggleActive"
         >
           {{ strategy.is_active ? '暂停' : '启动' }}
         </el-button>
-        <el-button size="small" @click="openConfig">
+        <el-button size="small" @click.stop="openConfig">
           <el-icon><Setting /></el-icon>
         </el-button>
       </div>

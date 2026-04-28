@@ -124,9 +124,10 @@ class StrategyRunner:
             if symbol in self._symbol_locks and self._symbol_locks[symbol] != strategy_id:
                 continue
 
-            # 检查是否已有持仓
+            # 检查是否已有持仓 → 更新 peak/trough
             positions = self.client.get_positions(inst_id=symbol)
             if positions:
+                await self._update_position_pnl(strategy_id, symbol, positions[0])
                 continue
 
             try:
@@ -136,13 +137,28 @@ class StrategyRunner:
                     continue
 
                 signal = None
+                indicators_snapshot = None
 
                 if decision_mode == "ai":
                     # AI 决策模式
                     signal = await self._ai_decide(strategy, df, params, row, symbol)
+                    # 计算指标快照用于记录
+                    try:
+                        indicators_snapshot = strategy.compute_indicators(df, params)
+                    except Exception:
+                        pass
                 else:
                     # 纯技术指标决策
                     signal = strategy.check_signal(df, params)
+                    try:
+                        indicators_snapshot = strategy.compute_indicators(df, params)
+                    except Exception:
+                        pass
+
+                # 记录信号到 strategy_signals 表
+                await self._record_signal(
+                    db, strategy_id, symbol, decision_mode, signal, indicators_snapshot
+                )
 
                 if signal:
                     logger.info(f"📡 信号检测 | {symbol} | {signal['reason']}")
@@ -170,6 +186,64 @@ class StrategyRunner:
 
             except Exception as e:
                 logger.error(f"扫描 {symbol} 异常: {e}")
+
+    async def _record_signal(self, db, strategy_id, symbol, decision_mode, signal, indicators):
+        """记录信号到 strategy_signals 表"""
+        try:
+            direction = signal.get("direction") if signal else "idle"
+            confidence = signal.get("confidence", 0) if signal else 0
+            reasoning = signal.get("reason", "") if signal else ""
+            result = "signal" if signal else "idle"
+
+            await db.execute(
+                """INSERT INTO strategy_signals
+                   (strategy_id, symbol, direction, confidence, reasoning, indicators, decision_mode, result)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    strategy_id, symbol, direction, confidence, reasoning,
+                    json.dumps(indicators, ensure_ascii=False) if indicators else None,
+                    decision_mode, result,
+                ),
+            )
+            await db.commit()
+
+            # 自动清理超过 500 条的旧记录
+            await db.execute(
+                """DELETE FROM strategy_signals WHERE id IN (
+                    SELECT id FROM strategy_signals WHERE strategy_id = ?
+                    ORDER BY created_at DESC LIMIT -1 OFFSET 500
+                )""",
+                (strategy_id,),
+            )
+            await db.commit()
+        except Exception as e:
+            logger.error(f"记录信号失败: {e}")
+
+    async def _update_position_pnl(self, strategy_id: str, symbol: str, okx_pos: dict):
+        """更新持仓的最高/最低盈亏"""
+        try:
+            upl = float(okx_pos.get("upl", 0) or 0)
+            db = await get_db()
+
+            cursor = await db.execute(
+                "SELECT peak_pnl, trough_pnl FROM positions WHERE symbol = ? AND strategy_id = ?",
+                (symbol, strategy_id),
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return
+
+            peak = max(row["peak_pnl"] or 0, upl)
+            trough = min(row["trough_pnl"] or 0, upl)
+
+            await db.execute(
+                "UPDATE positions SET peak_pnl = ?, trough_pnl = ? WHERE symbol = ? AND strategy_id = ?",
+                (peak, trough, symbol, strategy_id),
+            )
+            await db.commit()
+        except Exception as e:
+            logger.error(f"更新持仓盈亏失败: {e}")
+
 
     async def _ai_decide(self, strategy, df, params, row, symbol) -> dict | None:
         """AI 决策模式"""

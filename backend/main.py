@@ -159,10 +159,21 @@ async def health_check():
     return {"status": "ok", "mode": "模拟盘" if config.OKX_DEMO else "实盘"}
 
 
-# 生产环境托管前端静态文件
+# 生产环境托管前端静态文件（SPA history mode）
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
-    app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
+    # 静态资源（JS/CSS/图片等）
+    app.mount("/assets", StaticFiles(directory=str(static_dir / "assets")), name="assets")
+
+    # SPA fallback: 所有非 /api、/ws 路径都返回 index.html
+    from fastapi.responses import FileResponse
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        file_path = static_dir / full_path
+        if file_path.is_file():
+            return FileResponse(str(file_path))
+        return FileResponse(str(static_dir / "index.html"))
 
 
 if __name__ == "__main__":

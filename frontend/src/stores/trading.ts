@@ -54,6 +54,7 @@ export const useTradingStore = defineStore('trading', () => {
   const trades = ref<any[]>([])
   const symbols = ref<any[]>([])
   const logs = ref<LogEntry[]>([])
+  const strategyLogs = ref<Record<string, LogEntry[]>>({})
   const loading = ref(false)
   const wsConnected = ref(false)
 
@@ -120,9 +121,19 @@ export const useTradingStore = defineStore('trading', () => {
   function addLog(type: LogEntry['type'], message: string) {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
     logs.value.unshift({ time, type, message })
-    // 保留最近 200 条
     if (logs.value.length > 200) {
       logs.value = logs.value.slice(0, 200)
+    }
+  }
+
+  function addStrategyLog(strategyId: string, type: LogEntry['type'], message: string) {
+    const time = new Date().toLocaleTimeString('zh-CN', { hour12: false })
+    if (!strategyLogs.value[strategyId]) {
+      strategyLogs.value[strategyId] = []
+    }
+    strategyLogs.value[strategyId].unshift({ time, type, message })
+    if (strategyLogs.value[strategyId].length > 200) {
+      strategyLogs.value[strategyId] = strategyLogs.value[strategyId].slice(0, 200)
     }
   }
 
@@ -146,11 +157,15 @@ export const useTradingStore = defineStore('trading', () => {
     ws.onmessage = (event) => {
       try {
         const msg = JSON.parse(event.data)
+        const sid = msg.data?.strategy_id || ''
         if (msg.event === 'signal') {
-          addLog('signal', `📡 ${msg.data.symbol} | ${msg.data.signal?.reason || ''}`)
+          const logMsg = `📡 ${msg.data.symbol} | ${msg.data.signal?.reason || ''}`
+          addLog('signal', logMsg)
+          if (sid) addStrategyLog(sid, 'signal', logMsg)
         } else if (msg.event === 'trade') {
-          addLog('trade', `✅ ${msg.data.symbol} ${msg.data.direction} @ ${msg.data.price}`)
-          // 刷新数据
+          const logMsg = `✅ ${msg.data.symbol} ${msg.data.direction} @ ${msg.data.price}`
+          addLog('trade', logMsg)
+          if (sid) addStrategyLog(sid, 'trade', logMsg)
           fetchPositions()
           fetchAccount()
           fetchTrades()
@@ -158,7 +173,9 @@ export const useTradingStore = defineStore('trading', () => {
           const s = strategies.value.find((s) => s.id === msg.data.id)
           if (s) s.is_active = msg.data.is_active
         } else if (msg.event === 'error') {
-          addLog('error', `❌ ${msg.data.message}`)
+          const logMsg = `❌ ${msg.data.message}`
+          addLog('error', logMsg)
+          if (sid) addStrategyLog(sid, 'error', logMsg)
         }
       } catch {
         // ignore non-JSON (pong)
@@ -190,6 +207,7 @@ export const useTradingStore = defineStore('trading', () => {
     trades,
     symbols,
     logs,
+    strategyLogs,
     loading,
     wsConnected,
     fetchAccount,
@@ -199,6 +217,7 @@ export const useTradingStore = defineStore('trading', () => {
     fetchSymbols,
     fetchAll,
     addLog,
+    addStrategyLog,
     connectWS,
     disconnectWS,
   }
