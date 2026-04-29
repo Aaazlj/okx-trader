@@ -5,7 +5,19 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - TZ=Asia/Shanghai
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"

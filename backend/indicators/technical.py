@@ -28,6 +28,26 @@ def calc_sma(values: np.ndarray, period: int) -> np.ndarray:
     return np.concatenate((pad, res))
 
 
+def calc_boll(
+    closes: np.ndarray, period: int = 20, std_mult: float = 2.0
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    计算布林带 (Bollinger Bands)
+
+    Returns:
+        (upper, middle, lower)
+    """
+    middle = calc_sma(closes, period)
+    n = len(closes)
+    upper = np.full(n, np.nan)
+    lower = np.full(n, np.nan)
+    for i in range(period - 1, n):
+        std = np.std(closes[i - period + 1 : i + 1], ddof=0)
+        upper[i] = middle[i] + std_mult * std
+        lower[i] = middle[i] - std_mult * std
+    return upper, middle, lower
+
+
 def calc_ema(values: np.ndarray, period: int) -> np.ndarray:
     """计算指数移动平均 EMA"""
     n = len(values)

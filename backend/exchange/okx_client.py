@@ -320,6 +320,27 @@ class OKXClient:
         logger.info(f"✅ 已市价平仓 {inst_id}")
         return True
 
+    def close_partial(
+        self, inst_id: str, direction: str, sz: str, td_mode: str = None
+    ) -> bool:
+        """市价部分平仓（减仓指定张数）"""
+        td_mode = td_mode or config.DEFAULT_MGN_MODE
+        # 平仓方向与持仓方向相反
+        side = "buy" if direction == "short" else "sell"
+        result = self.trade.place_order(
+            instId=inst_id,
+            tdMode=td_mode,
+            side=side,
+            ordType="market",
+            sz=sz,
+            reduceOnly=True,
+        )
+        if result.get("code") != "0":
+            logger.error(f"部分平仓失败 {inst_id}: {result.get('msg', '')}")
+            return False
+        logger.info(f"✅ 部分平仓 | {inst_id} {side} | 张数: {sz}")
+        return True
+
     def calc_contract_size(
         self, inst_id: str, usdt_amount: float, price: float, leverage: int
     ) -> int:
@@ -327,3 +348,46 @@ class OKXClient:
         ct_val = self.get_contract_value(inst_id)
         sz = int((usdt_amount * leverage) / (price * ct_val))
         return max(sz, 1)
+
+    # ═══════════════════════════════════════════
+    # 行情数据（扩展）
+    # ═══════════════════════════════════════════
+
+    def get_tickers(self) -> list[dict]:
+        """获取所有 SWAP ticker（含涨跌幅、24h 成交额）"""
+        result = self.market.get_tickers(instType="SWAP")
+        if result.get("code") != "0":
+            logger.error(f"获取 tickers 失败: {result.get('msg', '')}")
+            return []
+        tickers = []
+        for t in result.get("data", []):
+            inst_id = t.get("instId", "")
+            if not inst_id.endswith("-USDT-SWAP"):
+                continue
+            last = self._safe_float(t.get("last"))
+            open_24h = self._safe_float(t.get("open24h"))
+            chg_pct = ((last - open_24h) / open_24h * 100) if open_24h > 0 else 0
+            tickers.append({
+                "inst_id": inst_id,
+                "last": last,
+                "chg_pct": round(chg_pct, 4),
+                "vol_ccy_24h": self._safe_float(t.get("volCcy24h")),
+                "bid_px": self._safe_float(t.get("bidPx")),
+                "ask_px": self._safe_float(t.get("askPx")),
+            })
+        return tickers
+
+    def get_orderbook(self, inst_id: str, sz: str = "1") -> dict:
+        """获取盘口数据（用于计算买卖点差）"""
+        result = self.market.get_orderbook(instId=inst_id, sz=sz)
+        if result.get("code") != "0":
+            logger.error(f"获取盘口失败 {inst_id}: {result.get('msg', '')}")
+            return {}
+        data = result.get("data", [{}])[0]
+        asks = data.get("asks", [])
+        bids = data.get("bids", [])
+        return {
+            "ask": float(asks[0][0]) if asks else 0,
+            "bid": float(bids[0][0]) if bids else 0,
+        }
+

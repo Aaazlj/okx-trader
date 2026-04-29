@@ -10,6 +10,8 @@ from exchange.okx_client import OKXClient
 from db.database import get_db
 from strategies.registry import get_strategy
 from core.trade_executor import TradeExecutor
+from core.risk_manager import RiskManager
+from core.position_monitor import PositionMonitor
 from ws import ws_manager
 from utils.logger import get_logger
 
@@ -22,6 +24,8 @@ class StrategyRunner:
     def __init__(self, client: OKXClient):
         self.client = client
         self.executor = TradeExecutor(client)
+        self.risk_manager = RiskManager()
+        self.position_monitor = PositionMonitor(client, self.risk_manager)
         self.tasks: dict[str, asyncio.Task] = {}
         self._running = False
         # 仓位互斥锁: symbol -> strategy_id
@@ -38,6 +42,9 @@ class StrategyRunner:
             strategy_id = row["id"]
             await self._start_task(strategy_id)
 
+        # 启动持仓监控器
+        await self.position_monitor.start()
+
         logger.info(f"策略调度器已启动，运行中策略: {len(self.tasks)}")
 
     async def stop(self):
@@ -46,6 +53,7 @@ class StrategyRunner:
         for task in self.tasks.values():
             task.cancel()
         self.tasks.clear()
+        await self.position_monitor.stop()
         logger.info("策略调度器已停止")
 
     async def start_strategy(self, strategy_id: str):
@@ -119,6 +127,15 @@ class StrategyRunner:
             logger.error(f"策略类型未注册: {strategy_type}")
             return
 
+        # 动态标的扫描（如高潮衰竭剥头皮）：symbols 为空时调用策略自身的扫描
+        if not symbols and hasattr(strategy, "scan_candidates"):
+            symbols = strategy.scan_candidates(self.client)
+
+        # K 线周期：优先使用策略 params 中的 bar 配置
+        bar = params.get("bar", "1m")
+        # 多周期策略的高周期 K 线配置
+        htf_bar = params.get("htf_bar")
+
         for symbol in symbols:
             # 仓位互斥检查
             if symbol in self._symbol_locks and self._symbol_locks[symbol] != strategy_id:
@@ -131,27 +148,34 @@ class StrategyRunner:
                 continue
 
             try:
-                # 获取 K 线
-                df = self.client.get_candles(symbol, bar="1m", limit=500)
-                if df.empty or len(df) < 200:
+                # 获取主周期 K 线
+                df = self.client.get_candles(symbol, bar=bar, limit=500)
+                if df.empty or len(df) < 30:
                     continue
+
+                # 注入高周期数据到 params（多周期策略使用）
+                scan_params = dict(params)
+                if htf_bar:
+                    df_htf = self.client.get_candles(symbol, bar=htf_bar, limit=100)
+                    if not df_htf.empty:
+                        scan_params["df_htf"] = df_htf
 
                 signal = None
                 indicators_snapshot = None
 
                 if decision_mode == "ai":
                     # AI 决策模式
-                    signal = await self._ai_decide(strategy, df, params, row, symbol)
+                    signal = await self._ai_decide(strategy, df, scan_params, row, symbol)
                     # 计算指标快照用于记录
                     try:
-                        indicators_snapshot = strategy.compute_indicators(df, params)
+                        indicators_snapshot = strategy.compute_indicators(df, scan_params)
                     except Exception:
                         pass
                 else:
                     # 纯技术指标决策
-                    signal = strategy.check_signal(df, params)
+                    signal = strategy.check_signal(df, scan_params)
                     try:
-                        indicators_snapshot = strategy.compute_indicators(df, params)
+                        indicators_snapshot = strategy.compute_indicators(df, scan_params)
                     except Exception:
                         pass
 
@@ -163,6 +187,15 @@ class StrategyRunner:
                 if signal:
                     logger.info(f"📡 信号检测 | {symbol} | {signal['reason']}")
 
+                    # 风控检查
+                    risk_params = scan_params.get("risk", {})
+                    can_open, deny_reason = self.risk_manager.can_open(
+                        strategy_id, symbol, risk_params
+                    )
+                    if not can_open:
+                        logger.info(f"⛔ 风控拦截 | {symbol} | {deny_reason}")
+                        continue
+
                     # 广播信号
                     await ws_manager.broadcast("signal", {
                         "strategy_id": strategy_id,
@@ -172,7 +205,7 @@ class StrategyRunner:
                     })
 
                     # 执行交易
-                    await self.executor.execute(
+                    result = await self.executor.execute(
                         strategy_id=strategy_id,
                         symbol=symbol,
                         signal=signal,
@@ -180,6 +213,22 @@ class StrategyRunner:
                         order_amount=order_amount,
                         mgn_mode=mgn_mode,
                     )
+
+                    if result:
+                        # 记录开仓到风控
+                        self.risk_manager.record_open(strategy_id, symbol)
+
+                        # managed_exit 策略注册到持仓监控器
+                        if signal.get("managed_exit"):
+                            self.position_monitor.register(
+                                symbol=symbol,
+                                strategy_id=strategy_id,
+                                direction=signal["direction"],
+                                entry_price=result["fill_price"],
+                                quantity=result["fill_sz"],
+                                mgn_mode=result["mgn_mode"],
+                                exit_rules=signal.get("exit_rules", {}),
+                            )
 
                     # 锁定 symbol
                     self._symbol_locks[symbol] = strategy_id

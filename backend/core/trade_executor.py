@@ -26,12 +26,18 @@ class TradeExecutor:
         leverage: int,
         order_amount: float,
         mgn_mode: str,
-    ):
-        """执行交易"""
+    ) -> dict | None:
+        """
+        执行交易
+
+        Returns:
+            开仓结果 dict (fill_price, fill_sz) 或 None
+        """
         direction = signal["direction"]
         price = signal["price"]
         tp_price = signal["tp_price"]
         sl_price = signal["sl_price"]
+        managed_exit = signal.get("managed_exit", False)
 
         # 设置杠杆
         self.client.set_leverage(symbol, leverage, mgn_mode)
@@ -46,7 +52,7 @@ class TradeExecutor:
         order = self.client.place_market_order(symbol, side, str(sz), mgn_mode)
         if not order:
             logger.error(f"❌ 开仓失败 | {symbol} {direction}")
-            return
+            return None
 
         order_id = order.get("ordId", "")
 
@@ -54,24 +60,27 @@ class TradeExecutor:
         filled = self.client.wait_order_filled(order_id, symbol)
         if not filled:
             logger.error(f"❌ 订单未成交 | {symbol} ordId={order_id}")
-            return
+            return None
 
         fill_price = float(filled.get("avgPx", price))
         fill_sz = filled.get("accFillSz", str(sz))
 
-        # 设置 OCO 保护单（止盈+止损）
-        # OCO 的 side 是平仓方向: short -> buy, long -> sell
-        oco_side = "buy" if direction == "short" else "sell"
-        oco = self.client.place_oco(
-            inst_id=symbol,
-            tp_price=tp_price,
-            sl_price=sl_price,
-            sz=fill_sz,
-            side=oco_side,
-            td_mode=mgn_mode,
-        )
+        algo_id = ""
 
-        algo_id = oco.get("algoId", "") if oco else ""
+        if not managed_exit:
+            # 标准模式：设置 OCO 保护单（止盈+止损）
+            oco_side = "buy" if direction == "short" else "sell"
+            oco = self.client.place_oco(
+                inst_id=symbol,
+                tp_price=tp_price,
+                sl_price=sl_price,
+                sz=fill_sz,
+                side=oco_side,
+                td_mode=mgn_mode,
+            )
+            algo_id = oco.get("algoId", "") if oco else ""
+        else:
+            logger.info(f"📋 managed_exit 模式 | {symbol} | 跳过 OCO，由 PositionMonitor 管理")
 
         # 记录到数据库
         db = await get_db()
@@ -107,3 +116,10 @@ class TradeExecutor:
             f"价格: {fill_price} | 张数: {fill_sz} | "
             f"TP: {tp_price} | SL: {sl_price}"
         )
+
+        return {
+            "fill_price": fill_price,
+            "fill_sz": float(fill_sz),
+            "mgn_mode": mgn_mode,
+        }
+
