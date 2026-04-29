@@ -17,7 +17,7 @@ from exchange.okx_client import OKXClient
 from db.database import get_db, close_db
 from ws import ws_manager
 
-from api import account, positions, strategies, market
+from api import account, positions, strategies, market, settings
 
 logger = get_logger("main")
 
@@ -121,6 +121,7 @@ app.include_router(account.router)
 app.include_router(positions.router)
 app.include_router(strategies.router)
 app.include_router(market.router)
+app.include_router(settings.router)
 
 
 # 全局异常处理器（捕获路由内抛出的异常）

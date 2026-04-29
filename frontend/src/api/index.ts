@@ -37,6 +37,16 @@ export const getTradeHistory = (limit = 50, strategyId?: string) =>
   api.get('/trades/history', { params: { limit, strategy_id: strategyId } })
 
 // ═══════════════════════════════════════════
+// 系统配置
+// ═══════════════════════════════════════════
+
+export const getSettings = () => api.get('/settings')
+export const updateSettings = (data: any) => api.put('/settings', data)
+export const testAI = (data: any) => api.post('/settings/test-ai', data)
+export const testOKX = (data: any) => api.post('/settings/test-okx', data)
+export const testTelegram = (data: any) => api.post('/settings/test-telegram', data)
+
+// ═══════════════════════════════════════════
 // 健康检查
 // ═══════════════════════════════════════════
 

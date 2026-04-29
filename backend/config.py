@@ -35,6 +35,12 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 PORT = int(os.getenv("PORT", "8000"))
 
 # ═══════════════════════════════════════════
+# Telegram 通知
+# ═══════════════════════════════════════════
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+# ═══════════════════════════════════════════
 # 数据目录
 # ═══════════════════════════════════════════
 BASE_DIR = Path(__file__).parent

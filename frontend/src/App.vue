@@ -8,6 +8,7 @@ const route = useRoute()
 const router = useRouter()
 
 const isDetailPage = computed(() => route.name === 'strategy-detail')
+const isSettingsPage = computed(() => route.name === 'settings')
 
 onMounted(() => {
   document.documentElement.classList.add('dark')
@@ -54,6 +55,15 @@ function goBack() {
         >
           ● {{ store.wsConnected ? '已连接' : '未连接' }}
         </span>
+        <el-button
+          size="small"
+          circle
+          :type="isSettingsPage ? 'primary' : 'default'"
+          @click="router.push('/settings')"
+          title="系统设置"
+        >
+          <el-icon><Setting /></el-icon>
+        </el-button>
       </div>
     </header>
     <router-view />
