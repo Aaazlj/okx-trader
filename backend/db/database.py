@@ -455,10 +455,14 @@ async def _seed_default_strategies(db: aiosqlite.Connection):
         columns = list(s.keys())
         placeholders = ", ".join(f":{k}" for k in columns)
         col_names = ", ".join(columns)
+        # upsert: 已有策略只更新配置，保留 is_active 和 created_at
+        update_cols = [c for c in columns if c not in ("id", "is_active", "created_at")]
+        update_set = ", ".join(f"{c} = excluded.{c}" for c in update_cols)
         await db.execute(
-            f"INSERT INTO strategies ({col_names}) VALUES ({placeholders})",
+            f"INSERT INTO strategies ({col_names}) VALUES ({placeholders}) "
+            f"ON CONFLICT(id) DO UPDATE SET {update_set}",
             s,
         )
     await db.commit()
-    logger.info(f"已插入 {len(defaults)} 个默认策略配置")
+    logger.info(f"已初始化 {len(defaults)} 个默认策略配置")
 
