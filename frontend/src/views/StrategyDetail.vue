@@ -85,6 +85,28 @@ function signalResultLabel(r: string) {
   return r
 }
 
+function tradeDuration(entry: string, exit: string) {
+  if (!entry || !exit) return '-'
+  const ms = new Date(exit).getTime() - new Date(entry).getTime()
+  if (ms < 0) return '-'
+  const mins = Math.floor(ms / 60000)
+  if (mins < 60) return `${mins}m`
+  const h = Math.floor(mins / 60)
+  return `${h}h${mins % 60}m`
+}
+
+function formatDuration(seconds: number) {
+  if (!seconds || seconds <= 0) return '-'
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  if (h > 0) return `${h}h${m}m`
+  return `${m}m`
+}
+
+function pnlPercent(row: any) {
+  return row.pnl_ratio ?? null
+}
+
 onMounted(loadAll)
 watch(strategyId, loadAll)
 
@@ -187,6 +209,9 @@ onUnmounted(() => clearInterval(timer))
           </template>
         </el-table-column>
         <el-table-column prop="entry_price" label="入场价" width="120" />
+        <el-table-column label="现价" width="120">
+          <template #default="{ row }">{{ (row.current_price || 0).toFixed(2) }}</template>
+        </el-table-column>
         <el-table-column prop="quantity" label="数量" width="80" />
         <el-table-column label="最高盈亏" width="120">
           <template #default="{ row }">
@@ -199,7 +224,28 @@ onUnmounted(() => clearInterval(timer))
           </template>
         </el-table-column>
         <el-table-column prop="tp_price" label="止盈" width="100" />
+        <el-table-column label="TP距离" width="80">
+          <template #default="{ row }">
+            <span v-if="row.tp_distance_pct !== null" style="color: var(--accent-green)">
+              {{ row.tp_distance_pct > 0 ? '+' : '' }}{{ row.tp_distance_pct }}%
+            </span>
+            <span v-else style="color: var(--text-muted)">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="sl_price" label="止损" width="100" />
+        <el-table-column label="SL距离" width="80">
+          <template #default="{ row }">
+            <span v-if="row.sl_distance_pct !== null" style="color: var(--accent-red)">
+              {{ row.sl_distance_pct > 0 ? '+' : '' }}{{ row.sl_distance_pct }}%
+            </span>
+            <span v-else style="color: var(--text-muted)">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="时长" width="80">
+          <template #default="{ row }">
+            <span style="color: var(--text-muted)">{{ formatDuration(row.holding_seconds) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="open_time" label="开仓时间" width="170">
           <template #default="{ row }">{{ formatTime(row.open_time) }}</template>
         </el-table-column>
@@ -279,6 +325,25 @@ onUnmounted(() => clearInterval(timer))
             <span :class="(row.pnl || 0) >= 0 ? 'positive' : 'negative'">
               {{ (row.pnl || 0) >= 0 ? '+' : '' }}{{ (row.pnl || 0).toFixed(4) }}
             </span>
+          </template>
+        </el-table-column>
+        <el-table-column label="盈亏%" width="80">
+          <template #default="{ row }">
+            <span v-if="pnlPercent(row) !== null"
+                  :class="(row.pnl || 0) >= 0 ? 'positive' : 'negative'">
+              {{ (row.pnl || 0) >= 0 ? '+' : '' }}{{ pnlPercent(row) }}%
+            </span>
+            <span v-else style="color: var(--text-muted)">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="手续费" width="80">
+          <template #default="{ row }">
+            <span style="color: var(--text-muted)">{{ (row.fee || 0).toFixed(4) }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="时长" width="80">
+          <template #default="{ row }">
+            <span style="color: var(--text-muted)">{{ tradeDuration(row.entry_time, row.exit_time) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="最高盈亏" width="110">

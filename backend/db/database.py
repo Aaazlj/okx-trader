@@ -124,6 +124,7 @@ async def _init_tables(db: aiosqlite.Connection):
     # 兼容旧库：给 trades 表补充 peak_pnl/trough_pnl 列
     await _ensure_column(db, "trades", "peak_pnl", "REAL DEFAULT 0")
     await _ensure_column(db, "trades", "trough_pnl", "REAL DEFAULT 0")
+    await _ensure_column(db, "trades", "pnl_ratio", "REAL")
     await _ensure_column(db, "positions", "peak_pnl", "REAL DEFAULT 0")
     await _ensure_column(db, "positions", "trough_pnl", "REAL DEFAULT 0")
 

@@ -74,6 +74,7 @@ async def lifespan(app: FastAPI):
         account.set_client(okx_client)
         positions.set_client(okx_client)
         market.set_client(okx_client)
+        strategies.set_client(okx_client)
     except Exception as e:
         logger.error(f"OKX 客户端初始化失败: {e}\n{traceback.format_exc()}")
 

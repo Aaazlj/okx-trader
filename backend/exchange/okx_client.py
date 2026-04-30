@@ -6,7 +6,7 @@ import time
 from datetime import timedelta, timezone
 
 import pandas as pd
-from okx import MarketData, Account, Trade
+from okx import MarketData, PublicData, Account, Trade
 
 import config
 from utils.logger import get_logger
@@ -33,10 +33,16 @@ class OKXClient:
         if proxy:
             kwargs["proxy"] = proxy
 
-        market_kwargs = {"flag": flag, "debug": False}
+        # 行情数据永远用实盘 flag="0"（模拟盘端点不稳定）
+        market_kwargs = {"flag": "0", "debug": False}
         if proxy:
             market_kwargs["proxy"] = proxy
         self.market = MarketData.MarketAPI(**market_kwargs)
+        # 公共数据（品种信息等）也用实盘，无需凭证
+        public_kwargs = {"flag": "0", "debug": False}
+        if proxy:
+            public_kwargs["proxy"] = proxy
+        self.public = PublicData.PublicAPI(**public_kwargs)
         self.account = Account.AccountAPI(**kwargs)
         self.trade = Trade.TradeAPI(**kwargs)
 
@@ -54,7 +60,7 @@ class OKXClient:
         if inst_id in self._ct_val_cache:
             return self._ct_val_cache[inst_id]
 
-        result = self.account.get_instruments(instType="SWAP", instId=inst_id)
+        result = self.public.get_instruments(instType="SWAP", instId=inst_id)
         if result["code"] != "0" or not result["data"]:
             logger.warning(f"获取合约信息失败: {inst_id}, 使用默认面值 0.1")
             return 0.1
@@ -66,7 +72,7 @@ class OKXClient:
 
     def get_available_symbols(self) -> list[dict]:
         """获取所有可用的永续合约交易对"""
-        result = self.account.get_instruments(instType="SWAP")
+        result = self.public.get_instruments(instType="SWAP")
         if result["code"] != "0":
             logger.error(f"获取交易对列表失败: {result['msg']}")
             return []
@@ -262,6 +268,18 @@ class OKXClient:
         logger.error(f"等待订单成交超时 | ordId: {ord_id}")
         return None
 
+    @staticmethod
+    def _format_price(price: float) -> str:
+        """格式化价格，保留足够精度"""
+        if price >= 100:
+            return str(round(price, 2))
+        elif price >= 1:
+            return str(round(price, 4))
+        elif price >= 0.01:
+            return str(round(price, 6))
+        else:
+            return str(round(price, 8))
+
     def place_oco(
         self,
         inst_id: str,
@@ -281,9 +299,9 @@ class OKXClient:
             ordType="oco",
             sz=sz,
             reduceOnly="true",
-            tpTriggerPx=str(round(tp_price, 2)),
+            tpTriggerPx=self._format_price(tp_price),
             tpOrdPx="-1",
-            slTriggerPx=str(round(sl_price, 2)),
+            slTriggerPx=self._format_price(sl_price),
             slOrdPx="-1",
         )
         if result.get("code") != "0":
@@ -306,6 +324,9 @@ class OKXClient:
             kwargs["instId"] = inst_id
         result = self.account.get_positions(**kwargs)
         if result["code"] != "0":
+            # 51001 = 品种不存在，查询特定 symbol 时常见，不打 error
+            if result["code"] == "51001" and inst_id:
+                return []
             logger.error(f"获取持仓失败: {result['msg']}")
             return []
         return [p for p in result["data"] if float(p.get("pos", "0")) != 0]
@@ -348,6 +369,28 @@ class OKXClient:
         ct_val = self.get_contract_value(inst_id)
         sz = int((usdt_amount * leverage) / (price * ct_val))
         return max(sz, 1)
+
+    def get_fills(self, inst_id: str = None, inst_type: str = "SWAP") -> list:
+        """获取成交明细（近3天），用于同步平仓价格和手续费"""
+        kwargs = {"instType": inst_type}
+        if inst_id:
+            kwargs["instId"] = inst_id
+        result = self.trade.get_fills(**kwargs)
+        if result.get("code") != "0":
+            logger.warning(f"获取成交明细失败: {result.get('msg', '')}")
+            return []
+        return result.get("data", [])
+
+    def get_positions_history(self, inst_id: str = None, inst_type: str = "SWAP") -> list:
+        """获取历史持仓（含 realizedPnl、fee、pnl），比 fills 更准确"""
+        kwargs = {"instType": inst_type}
+        if inst_id:
+            kwargs["instId"] = inst_id
+        result = self.account.get_positions_history(**kwargs)
+        if result.get("code") != "0":
+            logger.warning(f"获取历史持仓失败: {result.get('msg', '')}")
+            return []
+        return result.get("data", [])
 
     # ═══════════════════════════════════════════
     # 行情数据（扩展）

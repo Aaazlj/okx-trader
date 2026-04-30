@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { startStrategy, stopStrategy, updateStrategy, getSymbols } from '../api'
@@ -8,6 +8,8 @@ import { useTradingStore, type Strategy } from '../stores/trading'
 const props = defineProps<{ strategy: Strategy }>()
 const store = useTradingStore()
 const router = useRouter()
+
+const stats = computed(() => store.strategyStats[props.strategy.id])
 
 const toggling = ref(false)
 const showConfig = ref(false)
@@ -135,63 +137,96 @@ async function loadSymbols() {
       </span>
     </div>
 
-    <!-- 配置对话框 -->
-    <el-dialog
-      v-model="showConfig"
-      :title="`配置 — ${strategy.name}`"
-      width="520px"
-      @open="loadSymbols"
-    >
-      <el-form label-width="100px" size="default">
-        <el-form-item label="交易对">
-          <el-select v-model="editForm.symbols" multiple filterable placeholder="选择交易对">
-            <el-option
-              v-for="sym in symbolOptions"
-              :key="sym"
-              :label="sym"
-              :value="sym"
-            />
-          </el-select>
-        </el-form-item>
+    <!-- 策略统计 -->
+    <div v-if="stats" class="stats-row">
+      <span class="stat-item" :class="stats.total_pnl >= 0 ? 'positive' : 'negative'">
+        {{ stats.total_pnl >= 0 ? '+' : '' }}{{ stats.total_pnl.toFixed(2) }} USDT
+      </span>
+      <span class="stat-item">
+        {{ stats.win_rate }}% 胜率
+      </span>
+      <span class="stat-item">
+        {{ stats.total_trades }} 笔
+      </span>
+      <span v-if="stats.active_positions > 0" class="stat-item accent">
+        {{ stats.active_positions }} 持仓
+      </span>
+    </div>
 
-        <el-form-item label="决策模式">
-          <el-radio-group v-model="editForm.decision_mode">
-            <el-radio value="technical">📐 纯技术指标</el-radio>
-            <el-radio value="ai">🤖 AI 驱动</el-radio>
-          </el-radio-group>
-        </el-form-item>
-
-        <el-form-item label="杠杆倍数">
-          <el-input-number v-model="editForm.leverage" :min="1" :max="100" :step="1" />
-        </el-form-item>
-
-        <el-form-item label="每单金额">
-          <el-input-number v-model="editForm.order_amount_usdt" :min="5" :step="10" />
-          <span style="margin-left: 8px; color: var(--text-secondary)">USDT</span>
-        </el-form-item>
-
-        <template v-if="editForm.decision_mode === 'ai'">
-          <el-divider content-position="left">AI 配置</el-divider>
-
-          <el-form-item label="最低置信度">
-            <el-slider v-model="editForm.ai_min_confidence" :min="0" :max="100" :step="5" show-input />
-          </el-form-item>
-
-          <el-form-item label="自定义 Prompt">
-            <el-input
-              v-model="editForm.ai_prompt"
-              type="textarea"
-              :rows="4"
-              placeholder="额外分析要求（可选）"
-            />
-          </el-form-item>
-        </template>
-      </el-form>
-
-      <template #footer>
-        <el-button @click="showConfig = false">取消</el-button>
-        <el-button type="primary" @click="saveConfig">保存</el-button>
-      </template>
-    </el-dialog>
   </div>
+
+  <!-- 配置对话框（放在 card 外面避免点击冒泡跳转） -->
+  <el-dialog
+    v-model="showConfig"
+    :title="`配置 — ${strategy.name}`"
+    width="520px"
+    @open="loadSymbols"
+  >
+    <el-form label-width="100px" size="default">
+      <el-form-item label="交易对">
+        <el-select v-model="editForm.symbols" multiple filterable placeholder="选择交易对">
+          <el-option
+            v-for="sym in symbolOptions"
+            :key="sym"
+            :label="sym"
+            :value="sym"
+          />
+        </el-select>
+      </el-form-item>
+
+      <el-form-item label="决策模式">
+        <el-radio-group v-model="editForm.decision_mode">
+          <el-radio value="technical">📐 纯技术指标</el-radio>
+          <el-radio value="ai">🤖 AI 驱动</el-radio>
+        </el-radio-group>
+      </el-form-item>
+
+      <el-form-item label="杠杆倍数">
+        <el-input-number v-model="editForm.leverage" :min="1" :max="100" :step="1" />
+      </el-form-item>
+
+      <el-form-item label="每单金额">
+        <el-input-number v-model="editForm.order_amount_usdt" :min="5" :step="10" />
+        <span style="margin-left: 8px; color: var(--text-secondary)">USDT</span>
+      </el-form-item>
+
+      <template v-if="editForm.decision_mode === 'ai'">
+        <el-divider content-position="left">AI 配置</el-divider>
+
+        <el-form-item label="最低置信度">
+          <el-slider v-model="editForm.ai_min_confidence" :min="0" :max="100" :step="5" show-input />
+        </el-form-item>
+
+        <el-form-item label="自定义 Prompt">
+          <el-input
+            v-model="editForm.ai_prompt"
+            type="textarea"
+            :rows="4"
+            placeholder="额外分析要求（可选）"
+          />
+        </el-form-item>
+      </template>
+    </el-form>
+
+    <template #footer>
+      <el-button @click="showConfig = false">取消</el-button>
+      <el-button type="primary" @click="saveConfig">保存</el-button>
+    </template>
+  </el-dialog>
 </template>
+
+<style scoped>
+.stats-row {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+.stat-item {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.stat-item.positive { color: var(--accent-green); }
+.stat-item.negative { color: var(--accent-red); }
+.stat-item.accent { color: var(--accent-blue, #3b82f6); }
+</style>

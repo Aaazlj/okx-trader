@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import { getBalance, getPositions, getStrategies, getTradeHistory, getSymbols } from '../api'
+import { getBalance, getPositions, getStrategies, getStrategiesStats, getTradeHistory, getSymbols } from '../api'
 
 export interface Strategy {
   id: string
@@ -23,9 +23,16 @@ export interface Position {
   direction: 'long' | 'short'
   quantity: number
   entry_price: number
+  current_price: number
   unrealized_pnl: number
   leverage: number
   margin_mode: string
+  tp_price: number | null
+  sl_price: number | null
+  tp_distance_pct: number | null
+  sl_distance_pct: number | null
+  holding_seconds: number
+  strategy_id: string | null
 }
 
 export interface AccountInfo {
@@ -33,6 +40,13 @@ export interface AccountInfo {
   available_balance: number
   unrealized_pnl: number
   mode: string
+}
+
+export interface StrategyStats {
+  total_pnl: number
+  total_trades: number
+  win_rate: number
+  active_positions: number
 }
 
 export interface LogEntry {
@@ -50,6 +64,7 @@ export const useTradingStore = defineStore('trading', () => {
   })
 
   const strategies = ref<Strategy[]>([])
+  const strategyStats = ref<Record<string, StrategyStats>>({})
   const positions = ref<Position[]>([])
   const trades = ref<any[]>([])
   const symbols = ref<any[]>([])
@@ -76,6 +91,15 @@ export const useTradingStore = defineStore('trading', () => {
       strategies.value = data
     } catch (e) {
       console.error('获取策略失败', e)
+    }
+  }
+
+  async function fetchStrategiesStats() {
+    try {
+      const { data } = await getStrategiesStats()
+      strategyStats.value = data
+    } catch (e) {
+      console.error('获取策略统计失败', e)
     }
   }
 
@@ -111,6 +135,7 @@ export const useTradingStore = defineStore('trading', () => {
     await Promise.allSettled([
       fetchAccount(),
       fetchStrategies(),
+      fetchStrategiesStats(),
       fetchPositions(),
       fetchTrades(),
       fetchSymbols(),
@@ -203,6 +228,7 @@ export const useTradingStore = defineStore('trading', () => {
   return {
     account,
     strategies,
+    strategyStats,
     positions,
     trades,
     symbols,
@@ -212,6 +238,7 @@ export const useTradingStore = defineStore('trading', () => {
     wsConnected,
     fetchAccount,
     fetchStrategies,
+    fetchStrategiesStats,
     fetchPositions,
     fetchTrades,
     fetchSymbols,

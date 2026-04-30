@@ -11,11 +11,17 @@ router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
 # 策略调度器引用（在 main.py 启动时注入）
 _runner = None
+_client = None
 
 
 def set_runner(runner):
     global _runner
     _runner = runner
+
+
+def set_client(client):
+    global _client
+    _client = client
 
 
 def _row_to_strategy(row) -> dict:
@@ -44,6 +50,50 @@ async def list_strategies():
     cursor = await db.execute("SELECT * FROM strategies ORDER BY created_at")
     rows = await cursor.fetchall()
     return [_row_to_strategy(row) for row in rows]
+
+
+@router.get("/stats")
+async def get_strategies_stats():
+    """批量获取所有策略的聚合统计（PnL、胜率、交易数、持仓数）"""
+    db = await get_db()
+
+    # 1. 交易统计：按 strategy_id 聚合
+    cursor = await db.execute(
+        """SELECT strategy_id,
+                  COALESCE(SUM(pnl), 0) AS total_pnl,
+                  COUNT(*) AS total_trades,
+                  SUM(CASE WHEN pnl > 0 THEN 1 ELSE 0 END) AS wins,
+                  SUM(CASE WHEN pnl < 0 THEN 1 ELSE 0 END) AS losses
+           FROM trades GROUP BY strategy_id"""
+    )
+    trade_rows = await cursor.fetchall()
+
+    # 2. 活跃持仓数：按 strategy_id 计数
+    cursor = await db.execute(
+        "SELECT strategy_id, COUNT(*) AS pos_count FROM positions GROUP BY strategy_id"
+    )
+    pos_rows = await cursor.fetchall()
+
+    # 组装结果
+    stats = {}
+    for row in trade_rows:
+        sid = row["strategy_id"]
+        total = row["wins"] + row["losses"]
+        stats[sid] = {
+            "total_pnl": round(row["total_pnl"], 4),
+            "total_trades": row["total_trades"],
+            "win_rate": round(row["wins"] / total * 100, 1) if total > 0 else 0,
+            "active_positions": 0,
+        }
+    for row in pos_rows:
+        sid = row["strategy_id"]
+        if sid not in stats:
+            stats[sid] = {
+                "total_pnl": 0, "total_trades": 0, "win_rate": 0, "active_positions": 0,
+            }
+        stats[sid]["active_positions"] = row["pos_count"]
+
+    return stats
 
 
 @router.get("/{strategy_id}", response_model=StrategyResponse)
@@ -146,13 +196,46 @@ async def stop_strategy(strategy_id: str):
 
 @router.get("/{strategy_id}/positions")
 async def get_strategy_positions(strategy_id: str):
-    """获取策略关联的持仓（含最高/最低盈亏）"""
+    """获取策略关联的持仓（含实时价格、最高/最低盈亏）"""
+    import time as _time
     db = await get_db()
     cursor = await db.execute(
         "SELECT * FROM positions WHERE strategy_id = ?", (strategy_id,)
     )
     rows = await cursor.fetchall()
-    return [dict(row) for row in rows]
+    if not rows:
+        return []
+
+    # 获取实时价格
+    price_map = {}
+    if _client:
+        try:
+            tickers = _client.get_tickers()
+            price_map = {t["inst_id"]: t["last"] for t in tickers if t.get("last")}
+        except Exception:
+            pass
+
+    result = []
+    now = _time.time()
+    for row in rows:
+        d = dict(row)
+        symbol = d.get("symbol", "")
+        current = price_map.get(symbol, d.get("entry_price", 0))
+        d["current_price"] = current
+
+        # TP/SL 距离
+        tp = d.get("tp_price") or 0
+        sl = d.get("sl_price") or 0
+        d["tp_distance_pct"] = round((tp - current) / current * 100, 2) if tp > 0 and current > 0 else None
+        d["sl_distance_pct"] = round((sl - current) / current * 100, 2) if sl > 0 and current > 0 else None
+
+        # 持仓时长
+        from api.positions import _parse_open_time
+        open_ts = _parse_open_time(d.get("open_time", ""))
+        d["holding_seconds"] = int(now - open_ts) if open_ts > 0 else 0
+
+        result.append(d)
+    return result
 
 
 @router.get("/{strategy_id}/signals")
