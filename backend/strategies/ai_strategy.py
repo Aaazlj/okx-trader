@@ -34,7 +34,7 @@ class AIStrategy(IStrategy):
         # 信号生成由 strategy_runner._ai_decide 完成
         return None
 
-    def compute_indicators(self, df: pd.DataFrame, params: dict) -> dict:
+    def compute_indicators(self, df: pd.DataFrame, params: dict, oi_data: dict = None) -> dict:
         """计算全量指标供 AI 分析"""
         closes = df["close"].values
         highs = df["high"].values
@@ -45,45 +45,53 @@ class AIStrategy(IStrategy):
         idx = len(df) - 1
         result = {"price": round(closes[idx], 4)}
 
+        # 可配置的指标开关
+        enabled = params.get("indicators", ["EMA", "RSI", "ADX", "ATR", "MACD"])
+
         # EMA 多周期
-        ema_periods = params.get("ema_periods", [7, 20, 50, 120, 200])
-        for p in ema_periods:
-            ema = calc_ema(closes, p)
-            val = ema[idx]
-            result[f"EMA{p}"] = round(val, 4) if not np.isnan(val) else None
+        if "EMA" in enabled:
+            ema_periods = params.get("ema_periods", [7, 20, 50, 120, 200])
+            for p in ema_periods:
+                ema = calc_ema(closes, p)
+                val = ema[idx]
+                result[f"EMA{p}"] = round(val, 4) if not np.isnan(val) else None
 
         # RSI
-        rsi = calc_rsi(closes, params.get("rsi_period", 14))
-        result["RSI"] = round(rsi[idx], 2) if not np.isnan(rsi[idx]) else None
+        if "RSI" in enabled:
+            rsi = calc_rsi(closes, params.get("rsi_period", 14))
+            result["RSI"] = round(rsi[idx], 2) if not np.isnan(rsi[idx]) else None
 
         # ADX
-        adx = calc_adx(highs, lows, closes, params.get("adx_period", 14))
-        result["ADX"] = round(adx[idx], 2) if not np.isnan(adx[idx]) else None
+        if "ADX" in enabled:
+            adx = calc_adx(highs, lows, closes, params.get("adx_period", 14))
+            result["ADX"] = round(adx[idx], 2) if not np.isnan(adx[idx]) else None
 
         # ATR
-        atr = calc_atr(highs, lows, closes, params.get("atr_period", 14))
-        result["ATR"] = round(atr[idx], 4) if not np.isnan(atr[idx]) else None
+        if "ATR" in enabled:
+            atr = calc_atr(highs, lows, closes, params.get("atr_period", 14))
+            result["ATR"] = round(atr[idx], 4) if not np.isnan(atr[idx]) else None
 
         # MACD
-        macd_params = params.get("macd_params", {"fast": 12, "slow": 26, "signal": 9})
-        macd_line, signal_line, histogram = calc_macd(
-            closes,
-            macd_params.get("fast", 12),
-            macd_params.get("slow", 26),
-            macd_params.get("signal", 9),
-        )
-        result["MACD"] = round(macd_line[idx], 4) if not np.isnan(macd_line[idx]) else None
-        result["MACD_Signal"] = round(signal_line[idx], 4) if not np.isnan(signal_line[idx]) else None
-        result["MACD_Histogram"] = round(histogram[idx], 4) if not np.isnan(histogram[idx]) else None
+        if "MACD" in enabled:
+            macd_params = params.get("macd_params", {"fast": 12, "slow": 26, "signal": 9})
+            macd_line, signal_line, histogram = calc_macd(
+                closes,
+                macd_params.get("fast", 12),
+                macd_params.get("slow", 26),
+                macd_params.get("signal", 9),
+            )
+            result["MACD"] = round(macd_line[idx], 4) if not np.isnan(macd_line[idx]) else None
+            result["MACD_Signal"] = round(signal_line[idx], 4) if not np.isnan(signal_line[idx]) else None
+            result["MACD_Histogram"] = round(histogram[idx], 4) if not np.isnan(histogram[idx]) else None
 
-        # 成交量
+        # 成交量（始终计算）
         avg_vol = calc_sma(volumes, params.get("vol_compare_period", 20))
         result["volume"] = round(volumes[idx], 2)
         result["avg_volume"] = round(avg_vol[idx], 2) if not np.isnan(avg_vol[idx]) else None
         if result["avg_volume"] and result["avg_volume"] > 0:
             result["volume_ratio"] = round(volumes[idx] / avg_vol[idx], 2)
 
-        # K线形态
+        # K线形态（始终计算）
         body = closes[idx] - opens[idx]
         candle_range = highs[idx] - lows[idx]
         result["candle_type"] = "阳线" if body > 0 else "阴线"
@@ -94,5 +102,10 @@ class AIStrategy(IStrategy):
         # 前一根 K 线成交量（用于预估成交量比较）
         if idx > 0:
             result["prev_volume"] = round(volumes[idx - 1], 2)
+
+        # OI 数据
+        if oi_data:
+            result["OI"] = round(oi_data.get("oi", 0), 2)
+            result["OI_ccy"] = round(oi_data.get("oiCcy", 0), 2)
 
         return result
