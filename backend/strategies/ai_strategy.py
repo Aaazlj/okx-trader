@@ -30,9 +30,60 @@ class AIStrategy(IStrategy):
         return self._direction
 
     def check_signal(self, df: pd.DataFrame, params: dict) -> dict | None:
-        # AI 策略不支持纯技术指标模式，始终返回 None
-        # 信号生成由 strategy_runner._ai_decide 完成
-        return None
+        """hybrid 模式：指标预筛（快速过滤无信号场景，减少 LLM 调用）"""
+        pre_filter = params.get("pre_filter")
+        if not pre_filter:
+            return None
+
+        closes = df["close"].values
+        highs = df["high"].values
+        lows = df["low"].values
+        idx = len(df) - 1
+
+        # ADX 趋势强度过滤
+        adx_min = pre_filter.get("adx_min", 0)
+        if adx_min > 0:
+            adx = calc_adx(highs, lows, closes, params.get("adx_period", 14))
+            if np.isnan(adx[idx]) or adx[idx] < adx_min:
+                return None
+
+        # EMA 方向过滤
+        ema_direction = pre_filter.get("ema_direction")
+        if ema_direction:
+            ema_periods = params.get("ema_periods", [7, 20, 50])
+            fast_p = ema_periods[0] if len(ema_periods) > 0 else 7
+            slow_p = ema_periods[-1] if len(ema_periods) > 1 else 50
+            fast_ema = calc_ema(closes, fast_p)
+            slow_ema = calc_ema(closes, slow_p)
+
+            if ema_direction is True:
+                # Just check there's a clear direction (not flat)
+                if abs(fast_ema[idx] - slow_ema[idx]) / slow_ema[idx] < 0.001:
+                    return None
+            elif ema_direction == "long":
+                if fast_ema[idx] <= slow_ema[idx]:
+                    return None
+            elif ema_direction == "short":
+                if fast_ema[idx] >= slow_ema[idx]:
+                    return None
+
+        # RSI 区间过滤
+        rsi_range = pre_filter.get("rsi_range")
+        if rsi_range:
+            rsi = calc_rsi(closes, params.get("rsi_period", 14))
+            rsi_val = rsi[idx]
+            if np.isnan(rsi_val) or rsi_val < rsi_range[0] or rsi_val > rsi_range[1]:
+                return None
+
+        # 通过所有过滤器 → 返回占位信号（方向由 AI 决定）
+        price = closes[idx]
+        return {
+            "direction": "long",
+            "price": round(price, 4),
+            "tp_price": 0,
+            "sl_price": 0,
+            "reason": "📊 指标预筛通过",
+        }
 
     def compute_indicators(self, df: pd.DataFrame, params: dict, oi_data: dict = None) -> dict:
         """计算全量指标供 AI 分析"""
