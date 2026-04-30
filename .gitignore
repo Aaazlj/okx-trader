@@ -27,3 +27,7 @@ data/
 .output/
 static/
 outputs/
+
+# AI
+docs/
+.serena/
