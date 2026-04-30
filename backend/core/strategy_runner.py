@@ -300,7 +300,14 @@ class StrategyRunner:
             from ai.analyzer import AIAnalyzer
             analyzer = AIAnalyzer()
 
-            indicators = strategy.compute_indicators(df, params)
+            # 获取 OI 数据（失败不影响主流程）
+            oi_data = None
+            try:
+                oi_data = self.client.get_open_interest(symbol)
+            except Exception:
+                pass
+
+            indicators = strategy.compute_indicators(df, params, oi_data=oi_data)
             ai_prompt = row["ai_prompt"] or ""
             min_confidence = row["ai_min_confidence"]
 
