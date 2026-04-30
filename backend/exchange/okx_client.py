@@ -457,14 +457,14 @@ class OKXClient:
             "bid": float(bids[0][0]) if bids else 0,
         }
 
-    def get_open_interest(self, inst_id: str, inst_type: str = "SWAP") -> dict | None:
+    def get_open_interest(self, inst_id: str) -> dict | None:
         """获取合约持仓量（Open Interest）
 
         调用 OKX Rubik Stat 接口，返回最新 OI 数据。
+        数据格式: [ts, oi, oiCcy, oiUsd]
         """
-        ccy = inst_id.split("-")[0]
-        url = "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest"
-        params = {"ccy": ccy, "instType": inst_type}
+        url = "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest-history"
+        params = {"instId": inst_id}
 
         try:
             proxy = config.HTTPS_PROXY or config.HTTP_PROXY or None
@@ -484,9 +484,9 @@ class OKXClient:
 
             latest = data[0]
             return {
-                "oi": float(latest["oi"]),
-                "oiCcy": float(latest["oiCcy"]),
-                "ts": int(latest["ts"]),
+                "oi": float(latest[1]),
+                "oiCcy": float(latest[2]),
+                "ts": int(latest[0]),
             }
         except Exception as e:
             logger.warning(f"获取OI异常 {inst_id}: {e}")
