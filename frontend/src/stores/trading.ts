@@ -8,7 +8,7 @@ export interface Strategy {
   strategy_type: string
   is_active: boolean
   symbols: string[]
-  decision_mode: 'technical' | 'ai'
+  decision_mode: 'technical' | 'ai' | 'hybrid'
   leverage: number
   order_amount_usdt: number
   mgn_mode: string

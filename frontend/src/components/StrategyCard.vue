@@ -21,7 +21,7 @@ function goToDetail() {
 // 编辑表单
 const editForm = ref({
   symbols: [] as string[],
-  decision_mode: 'technical' as 'technical' | 'ai',
+  decision_mode: 'technical' as 'technical' | 'ai' | 'hybrid',
   leverage: 10,
   order_amount_usdt: 50,
   ai_min_confidence: 70,
@@ -113,6 +113,9 @@ async function loadSymbols() {
         <span class="mode-btn" :class="{ active: strategy.decision_mode === 'technical' }">
           📐 技术指标
         </span>
+        <span class="mode-btn" :class="{ active: strategy.decision_mode === 'hybrid' }">
+          🔀 混合模式
+        </span>
         <span class="mode-btn" :class="{ active: strategy.decision_mode === 'ai' }">
           🤖 AI驱动
         </span>
@@ -177,6 +180,7 @@ async function loadSymbols() {
       <el-form-item label="决策模式">
         <el-radio-group v-model="editForm.decision_mode">
           <el-radio value="technical">📐 纯技术指标</el-radio>
+          <el-radio value="hybrid">🔀 混合模式 (指标+AI)</el-radio>
           <el-radio value="ai">🤖 AI 驱动</el-radio>
         </el-radio-group>
       </el-form-item>
@@ -190,7 +194,7 @@ async function loadSymbols() {
         <span style="margin-left: 8px; color: var(--text-secondary)">USDT</span>
       </el-form-item>
 
-      <template v-if="editForm.decision_mode === 'ai'">
+      <template v-if="editForm.decision_mode === 'ai' || editForm.decision_mode === 'hybrid'">
         <el-divider content-position="left">AI 配置</el-divider>
 
         <el-form-item label="最低置信度">

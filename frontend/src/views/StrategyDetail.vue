@@ -130,8 +130,8 @@ onUnmounted(() => clearInterval(timer))
             {{ strategy.name }}
           </h2>
           <div class="overview-meta">
-            <el-tag size="small" :type="strategy.decision_mode === 'ai' ? 'warning' : 'info'" effect="dark">
-              {{ strategy.decision_mode === 'ai' ? '🤖 AI 驱动' : '📐 技术指标' }}
+            <el-tag size="small" :type="strategy.decision_mode === 'ai' ? 'warning' : strategy.decision_mode === 'hybrid' ? 'success' : 'info'" effect="dark">
+              {{ strategy.decision_mode === 'ai' ? '🤖 AI 驱动' : strategy.decision_mode === 'hybrid' ? '🔀 混合模式' : '📐 技术指标' }}
             </el-tag>
             <el-tag size="small" effect="plain">{{ strategy.leverage }}x</el-tag>
             <el-tag size="small" effect="plain">{{ strategy.order_amount_usdt }} USDT</el-tag>
@@ -167,9 +167,9 @@ onUnmounted(() => clearInterval(timer))
 
     <!-- ③ AI Prompt / 策略参数 -->
     <div class="section">
-      <h3>{{ strategy.decision_mode === 'ai' ? '🤖 AI Prompt 与参数' : '⚙️ 策略参数' }}</h3>
+      <h3>{{ (strategy.decision_mode === 'ai' || strategy.decision_mode === 'hybrid') ? '🤖 AI Prompt 与参数' : '⚙️ 策略参数' }}</h3>
       <div class="params-content">
-        <template v-if="strategy.decision_mode === 'ai'">
+        <template v-if="strategy.decision_mode === 'ai' || strategy.decision_mode === 'hybrid'">
           <div class="ai-confidence">
             <span>最低置信度: </span>
             <el-tag type="warning" effect="dark">{{ strategy.ai_min_confidence }}%</el-tag>
@@ -287,7 +287,7 @@ onUnmounted(() => clearInterval(timer))
             <span v-else style="color: var(--text-muted)">—</span>
           </template>
         </el-table-column>
-        <el-table-column label="置信度" width="80" v-if="strategy.decision_mode === 'ai'">
+        <el-table-column label="置信度" width="80" v-if="strategy.decision_mode === 'ai' || strategy.decision_mode === 'hybrid'">
           <template #default="{ row }">{{ row.confidence || '-' }}%</template>
         </el-table-column>
         <el-table-column label="分析理由" min-width="200">
