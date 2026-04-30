@@ -24,7 +24,7 @@ function renderChart() {
   if (!chartRef.value || !pnlData.value) return
 
   if (!chart) {
-    chart = echarts.init(chartRef.value, 'dark')
+    chart = echarts.init(chartRef.value)
   }
 
   const points = pnlData.value.points || []
@@ -35,7 +35,7 @@ function renderChart() {
         text: '暂无交易数据',
         left: 'center',
         top: 'center',
-        textStyle: { color: '#666', fontSize: 14 },
+        textStyle: { color: '#9C8E80', fontSize: 14, fontFamily: 'Source Serif 4, Georgia, serif' },
       },
     })
     return
@@ -49,18 +49,18 @@ function renderChart() {
     grid: { top: 40, right: 24, bottom: 32, left: 60 },
     tooltip: {
       trigger: 'axis',
-      backgroundColor: 'rgba(20,20,30,0.9)',
-      borderColor: '#333',
-      textStyle: { color: '#e0e0e0', fontSize: 12 },
+      backgroundColor: 'rgba(255,255,255,0.95)',
+      borderColor: '#E8DFD5',
+      textStyle: { color: '#2D2520', fontSize: 12 },
       formatter: (params: any) => {
         const p = params[0]
         const pt = points[p.dataIndex]
         return `
-          <div style="font-size:11px;color:#888">${p.name}</div>
-          <div>累计收益: <b style="color:${p.value >= 0 ? '#4ade80' : '#f87171'}">${p.value.toFixed(4)} USDT</b></div>
+          <div style="font-size:11px;color:#9C8E80">${p.name}</div>
+          <div>累计收益: <b style="color:${p.value >= 0 ? '#3A8A3A' : '#C44A3A'}">${p.value.toFixed(4)} USDT</b></div>
           <div>本笔: ${pt.trade_pnl >= 0 ? '+' : ''}${pt.trade_pnl.toFixed(4)} USDT</div>
           <div>${pt.symbol} ${pt.direction?.toUpperCase()}</div>
-          <div style="font-size:10px;color:#888">最高: +${pt.peak_pnl.toFixed(4)} / 最低: ${pt.trough_pnl.toFixed(4)}</div>
+          <div style="font-size:10px;color:#9C8E80">最高: +${pt.peak_pnl.toFixed(4)} / 最低: ${pt.trough_pnl.toFixed(4)}</div>
         `
       },
     },
@@ -69,15 +69,15 @@ function renderChart() {
       data: xData,
       axisLabel: {
         fontSize: 10,
-        color: '#888',
+        color: '#9C8E80',
         formatter: (v: string) => v.slice(11, 16),
       },
-      axisLine: { lineStyle: { color: '#333' } },
+      axisLine: { lineStyle: { color: '#E8DFD5' } },
     },
     yAxis: {
       type: 'value',
-      axisLabel: { fontSize: 10, color: '#888' },
-      splitLine: { lineStyle: { color: '#222' } },
+      axisLabel: { fontSize: 10, color: '#9C8E80' },
+      splitLine: { lineStyle: { color: '#F0EBE3' } },
     },
     series: [
       {
@@ -86,19 +86,19 @@ function renderChart() {
         smooth: true,
         symbol: 'circle',
         symbolSize: 4,
-        lineStyle: { width: 2, color: '#818cf8' },
+        lineStyle: { width: 2, color: '#C49060' },
         itemStyle: {
-          color: (params: any) => (params.value >= 0 ? '#4ade80' : '#f87171'),
+          color: (params: any) => (params.value >= 0 ? '#3A8A3A' : '#C44A3A'),
         },
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(129,140,248,0.3)' },
-            { offset: 1, color: 'rgba(129,140,248,0.02)' },
+            { offset: 0, color: 'rgba(196,144,96,0.18)' },
+            { offset: 1, color: 'rgba(196,144,96,0.02)' },
           ]),
         },
         markLine: {
           silent: true,
-          data: [{ yAxis: 0, lineStyle: { color: '#555', type: 'dashed' } }],
+          data: [{ yAxis: 0, lineStyle: { color: '#E8DFD5', type: 'dashed' } }],
           label: { show: false },
         },
       },

@@ -392,7 +392,7 @@ async function handleTestTG() {
   bottom: 0;
   left: 0;
   right: 0;
-  background: var(--bg-secondary);
+  background: rgba(255, 255, 255, 0.85);
   border-top: 1px solid var(--border-color);
   padding: 14px 24px;
   display: flex;
@@ -400,7 +400,8 @@ async function handleTestTG() {
   justify-content: center;
   gap: 16px;
   z-index: 100;
-  backdrop-filter: blur(12px);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
 }
 
 .save-hint {

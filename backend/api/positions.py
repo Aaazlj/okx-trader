@@ -166,7 +166,7 @@ async def get_positions():
                     )
                     logger.info(
                         f"📝 同步交易记录 | {sym} | 入场:{entry} 出场:{exit_px} "
-                        f"PnL:{pnl:.4f} 手续费:{fee:.6f} {'(fills)' if close_fill else '(估算)'}"
+                        f"PnL:{pnl:.4f} 手续费:{fee:.6f} {'(history)' if ph else '(fills)'}"
                     )
 
             placeholders = ",".join("?" for _ in stale_symbols)
@@ -245,14 +245,14 @@ async def get_positions():
                                 continue
                             fee = 0
                             exit_time = time.strftime("%Y-%m-%d %H:%M:%S")
-                        try:
-                            ct_val = _client.get_contract_value(sym)
-                        except Exception:
-                            ct_val = 0.01
-                        if direction == "long":
-                            pnl = (exit_px - entry) * qty * ct_val
-                        else:
-                            pnl = (entry - exit_px) * qty * ct_val
+                            try:
+                                ct_val = _client.get_contract_value(sym)
+                            except Exception:
+                                ct_val = 0.01
+                            if direction == "long":
+                                pnl = (exit_px - entry) * qty * ct_val
+                            else:
+                                pnl = (entry - exit_px) * qty * ct_val
 
                     await db.execute(
                         """UPDATE trades SET status = 'closed', exit_price = ?,
@@ -263,7 +263,7 @@ async def get_positions():
                     )
                     logger.info(
                         f"📝 历史同步 | {sym} | 入场:{entry} 出场:{exit_px} "
-                        f"PnL:{pnl:.4f} 手续费:{fee:.6f} {'(fills)' if close_fill else '(估算)'}"
+                        f"PnL:{pnl:.4f} 手续费:{fee:.6f} {'(history)' if ph else '(fills)'}"
                     )
                 await db.commit()
 

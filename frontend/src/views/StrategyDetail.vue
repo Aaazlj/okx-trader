@@ -28,8 +28,8 @@ const showPrompt = ref(false)
 // 策略对应的实时日志
 const liveLogs = computed(() => store.strategyLogs[strategyId.value] || [])
 
-async function loadAll() {
-  loading.value = true
+async function loadAll(initial = false) {
+  if (initial) loading.value = true
   try {
     const [sRes, pRes, sigRes, tRes] = await Promise.allSettled([
       getStrategy(strategyId.value),
@@ -107,8 +107,8 @@ function pnlPercent(row: any) {
   return row.pnl_ratio ?? null
 }
 
-onMounted(loadAll)
-watch(strategyId, loadAll)
+onMounted(() => loadAll(true))
+watch(strategyId, () => loadAll(true))
 
 // 定时刷新
 let timer: number
@@ -386,9 +386,11 @@ onUnmounted(() => clearInterval(timer))
   padding: 20px;
 }
 .section h3 {
+  font-family: var(--font-display);
   font-size: 15px;
   margin: 0 0 14px;
   color: var(--text-primary);
+  font-weight: 600;
 }
 .overview-section {
   padding: 24px;
@@ -400,11 +402,14 @@ onUnmounted(() => clearInterval(timer))
   margin-bottom: 16px;
 }
 .strategy-title {
+  font-family: var(--font-display);
   font-size: 22px;
+  font-weight: 600;
   margin: 0 0 8px;
   display: flex;
   align-items: center;
   gap: 10px;
+  letter-spacing: -0.02em;
 }
 .overview-meta {
   display: flex;
@@ -454,6 +459,7 @@ onUnmounted(() => clearInterval(timer))
 .prompt-toggle:hover { background: var(--bg-hover); }
 .prompt-text {
   padding: 12px; font-size: 11px; line-height: 1.6;
+  font-family: var(--font-mono);
   color: var(--text-secondary); white-space: pre-wrap; word-break: break-all;
   max-height: 400px; overflow-y: auto; margin: 0;
   background: var(--bg-primary);
@@ -475,9 +481,9 @@ onUnmounted(() => clearInterval(timer))
   display: flex; gap: 12px; padding: 4px 8px; font-size: 12px;
   border-radius: 4px; margin-bottom: 2px;
 }
-.log-line.signal { background: rgba(59,130,246,0.08); }
-.log-line.trade  { background: rgba(74,222,128,0.08); }
-.log-line.error  { background: rgba(248,113,113,0.08); }
+.log-line.signal { background: rgba(184,122,48,0.06); }
+.log-line.trade  { background: rgba(58,138,58,0.06); }
+.log-line.error  { background: rgba(196,74,58,0.06); }
 .log-time { color: var(--text-muted); white-space: nowrap; }
 .log-msg  { color: var(--text-primary); }
 .reasoning-text {
@@ -493,7 +499,7 @@ onUnmounted(() => clearInterval(timer))
 
 .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
 .status-dot.running { background: var(--accent-green); box-shadow: 0 0 6px var(--accent-green); }
-.status-dot.stopped { background: #666; }
+.status-dot.stopped { background: var(--text-muted); }
 
 .dark-table :deep(.el-table) { background: transparent; }
 </style>

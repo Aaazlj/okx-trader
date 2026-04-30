@@ -228,5 +228,5 @@ async function loadSymbols() {
 }
 .stat-item.positive { color: var(--accent-green); }
 .stat-item.negative { color: var(--accent-red); }
-.stat-item.accent { color: var(--accent-blue, #3b82f6); }
+.stat-item.accent { color: var(--accent-amber); }
 </style>

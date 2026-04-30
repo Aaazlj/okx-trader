@@ -56,14 +56,13 @@ class OKXClient:
     # ═══════════════════════════════════════════
 
     def get_contract_value(self, inst_id: str) -> float:
-        """获取合约面值（带缓存）"""
+        """获取合约面值（带缓存），品种不存在时抛异常"""
         if inst_id in self._ct_val_cache:
             return self._ct_val_cache[inst_id]
 
         result = self.public.get_instruments(instType="SWAP", instId=inst_id)
         if result["code"] != "0" or not result["data"]:
-            logger.warning(f"获取合约信息失败: {inst_id}, 使用默认面值 0.1")
-            return 0.1
+            raise ValueError(f"品种不存在: {inst_id}")
 
         ct_val = float(result["data"][0]["ctVal"])
         self._ct_val_cache[inst_id] = ct_val
@@ -196,6 +195,13 @@ class OKXClient:
             return {}
         try:
             data = result["data"][0]
+            # 顶层 upl 有时为空，从 details 中累加更可靠
+            upl = self._safe_float(data.get("upl"))
+            if upl == 0:
+                upl = sum(
+                    self._safe_float(d.get("upl"))
+                    for d in data.get("details", [])
+                )
             return {
                 "total_equity": self._safe_float(data.get("totalEq")),
                 "available_balance": self._safe_float(
@@ -204,7 +210,7 @@ class OKXClient:
                         0,
                     )
                 ),
-                "unrealized_pnl": self._safe_float(data.get("upl")),
+                "unrealized_pnl": upl,
             }
         except (IndexError, KeyError):
             return {}

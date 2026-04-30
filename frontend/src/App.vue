@@ -11,7 +11,6 @@ const isDetailPage = computed(() => route.name === 'strategy-detail')
 const isSettingsPage = computed(() => route.name === 'settings')
 
 onMounted(() => {
-  document.documentElement.classList.add('dark')
   store.fetchAll()
   store.connectWS()
   // 定时刷新（30秒）
