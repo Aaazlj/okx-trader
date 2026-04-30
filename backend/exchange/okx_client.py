@@ -93,17 +93,32 @@ class OKXClient:
     # 行情数据
     # ═══════════════════════════════════════════
 
+    @staticmethod
+    def _normalize_bar(bar: str) -> str:
+        """修正 bar 参数格式（OKX: m 小写, H/D/W/M 大写）"""
+        if not bar or len(bar) < 2:
+            return bar
+        suffix = bar[-1]
+        # h/d/w 需要大写；m 是分钟（小写），M 是月份（大写）— 不动
+        if suffix in ('h', 'd', 'w'):
+            return bar[:-1] + suffix.upper()
+        return bar
+
     def get_candles(
         self, inst_id: str, bar: str = "1m", limit: int = None
     ) -> pd.DataFrame:
         """获取最新 K 线数据"""
         limit = limit or config.CANDLE_FETCH_LIMIT
+        original_bar = bar
+        bar = self._normalize_bar(bar)
+        if original_bar != bar:
+            logger.info(f"bar 参数已修正: {original_bar} -> {bar}")
 
         result = self.market.get_candlesticks(
             instId=inst_id, bar=bar, limit=str(limit)
         )
         if result["code"] != "0":
-            logger.error(f"获取K线失败 {inst_id}: {result['msg']}")
+            logger.error(f"获取K线失败 {inst_id} (bar={bar}): {result['msg']}")
             return pd.DataFrame()
 
         df = pd.DataFrame(
@@ -131,6 +146,7 @@ class OKXClient:
         limit: int = 100,
     ) -> list:
         """获取历史 K 线数据（单次请求）"""
+        bar = self._normalize_bar(bar)
         params = {"instId": inst_id, "bar": bar, "limit": str(limit)}
         if after:
             params["after"] = after

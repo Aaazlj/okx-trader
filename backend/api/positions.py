@@ -270,7 +270,7 @@ async def get_positions():
         # 补填历史交易的手续费和盈亏（用 positions_history 的 realizedPnl）
         if okx_ok and pos_history_map:
             cursor = await db.execute(
-                "SELECT id, symbol FROM trades WHERE status = 'closed' AND (fee IS NULL OR reason LIKE '%同步%') LIMIT 30"
+                "SELECT id, symbol FROM trades WHERE status = 'closed' AND (fee IS NULL OR pnl_ratio IS NULL) LIMIT 30"
             )
             fix_trades = await cursor.fetchall()
             fixed = 0

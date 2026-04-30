@@ -60,3 +60,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 ## SKILLS
 OKX API: ~/.claude/skills/okx/SKILL.md
+
+## ERROR LOGS
+data/logs/error_*.log

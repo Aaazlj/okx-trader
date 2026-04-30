@@ -39,6 +39,13 @@ class TradeExecutor:
         sl_price = signal["sl_price"]
         managed_exit = signal.get("managed_exit", False)
 
+        # 验证品种是否存在
+        try:
+            ct_val = self.client.get_contract_value(symbol)
+        except Exception:
+            logger.error(f"❌ 品种不存在或查询失败 | {symbol}")
+            return None
+
         # 设置杠杆
         self.client.set_leverage(symbol, leverage, mgn_mode)
 
