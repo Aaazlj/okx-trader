@@ -328,12 +328,18 @@ class OKXClient:
             slOrdPx="-1",
         )
         if result.get("code") != "0":
-            logger.error(f"设置止盈止损失败 {inst_id}: {result.get('msg', '')}")
+            logger.error(
+                f"设置止盈止损失败 {inst_id}: code={result.get('code')} msg={result.get('msg', '')} "
+                f"TP={tp_price} SL={sl_price} sz={sz} side={side} tdMode={td_mode}"
+            )
             return None
 
         data = (result.get("data") or [{}])[0]
         if data.get("sCode") not in (None, "0"):
-            logger.error(f"设置止盈止损失败: {data.get('sMsg', '')}")
+            logger.error(
+                f"设置止盈止损失败 {inst_id}: sCode={data.get('sCode')} sMsg={data.get('sMsg', '')} "
+                f"TP={tp_price} SL={sl_price} sz={sz} side={side}"
+            )
             return None
 
         algo_id = data.get("algoId", "unknown")

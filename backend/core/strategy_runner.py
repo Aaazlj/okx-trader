@@ -344,11 +344,19 @@ class StrategyRunner:
                 tp_price = price * (1 + atr_pct / 100)
                 sl_price = price * (1 - atr_pct * 0.7 / 100)
 
+            def fmt_price(p: float) -> float:
+                if p >= 1:
+                    return round(p, 4)
+                elif p >= 0.01:
+                    return round(p, 6)
+                else:
+                    return round(p, 8)
+
             return {
                 "direction": direction,
-                "price": round(price, 2),
-                "tp_price": round(tp_price, 2),
-                "sl_price": round(sl_price, 2),
+                "price": fmt_price(price),
+                "tp_price": fmt_price(tp_price),
+                "sl_price": fmt_price(sl_price),
                 "reason": f"🤖 AI {direction.upper()} | 置信度 {confidence}% | {reasoning[:30]}",
             }
         except Exception as e:
