@@ -102,6 +102,99 @@ class AIAnalyzer:
             logger.error(f"AI 分析异常: {e}")
             return None
 
+    async def analyze_with_signal(
+        self,
+        symbol: str,
+        indicators: dict,
+        strategy_name: str,
+        technical_signal: dict,
+        custom_prompt: str = "",
+    ) -> dict | None:
+        """带技术信号参考的 AI 分析（hybrid 模式用）"""
+        if not self.api_key:
+            logger.warning("AI API Key 未配置，跳过 AI 分析")
+            return None
+
+        user_prompt = self._build_hybrid_prompt(
+            symbol, indicators, strategy_name, technical_signal, custom_prompt
+        )
+
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.post(
+                    f"{self.api_url}/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            {"role": "user", "content": user_prompt},
+                        ],
+                        "temperature": 0.3,
+                        "max_tokens": 200,
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+
+            if response.status_code != 200:
+                logger.error(f"AI API 请求失败: HTTP {response.status_code} {response.text[:200]}")
+                return None
+
+            result = response.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            content = self._extract_json(content)
+            parsed = json.loads(content)
+
+            direction = parsed.get("direction", "idle")
+            if direction not in ("long", "short", "idle"):
+                direction = "idle"
+
+            return {
+                "direction": direction,
+                "confidence": int(parsed.get("confidence", 0)),
+                "reasoning": parsed.get("reasoning", ""),
+            }
+        except json.JSONDecodeError:
+            logger.error(f"AI 返回的 JSON 解析失败: {content[:200]}")
+            return None
+        except Exception as e:
+            logger.error(f"AI 分析异常: {e}")
+            return None
+
+    def _build_hybrid_prompt(
+        self, symbol: str, indicators: dict, strategy_name: str,
+        technical_signal: dict, custom_prompt: str
+    ) -> str:
+        lines = [
+            f"## 交易对: {symbol}",
+            f"## 策略: {strategy_name}",
+            "",
+            "## 当前技术指标:",
+        ]
+
+        for key, value in indicators.items():
+            lines.append(f"- {key}: {value}")
+
+        lines.append("")
+        lines.append("## 技术指标预筛信号:")
+        lines.append(f"- 方向: {technical_signal.get('direction', 'unknown')}")
+        lines.append(f"- 理由: {technical_signal.get('reason', '')}")
+
+        if custom_prompt:
+            lines.append("")
+            lines.append("## 策略规则:")
+            lines.append(custom_prompt)
+
+        lines.append("")
+        lines.append("技术指标已给出方向信号，请结合指标数据和策略规则进行二次确认。")
+        lines.append("如果你认为技术指标的判断正确且置信度足够高，保持相同方向。")
+        lines.append("如果你认为技术指标判断有误或存在风险，返回 idle 或调整方向。")
+
+        return "\n".join(lines)
+
     def _build_user_prompt(
         self, symbol: str, indicators: dict, strategy_name: str, custom_prompt: str
     ) -> str:
