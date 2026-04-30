@@ -164,13 +164,27 @@ class StrategyRunner:
                 indicators_snapshot = None
 
                 if decision_mode == "ai":
-                    # AI 决策模式
+                    # 纯 AI 决策
                     signal = await self._ai_decide(strategy, df, scan_params, row, symbol)
-                    # 计算指标快照用于记录
                     try:
                         indicators_snapshot = strategy.compute_indicators(df, scan_params)
                     except Exception:
                         pass
+                elif decision_mode == "hybrid":
+                    # 混合模式：技术指标预筛 → AI 二次确认
+                    tech_signal = strategy.check_signal(df, scan_params)
+                    try:
+                        indicators_snapshot = strategy.compute_indicators(df, scan_params)
+                    except Exception:
+                        indicators_snapshot = None
+
+                    if tech_signal:
+                        logger.info(f"📊 技术信号 | {symbol} | {tech_signal['direction']} | {tech_signal['reason'][:40]}")
+                        signal = await self._ai_decide_hybrid(
+                            strategy, df, scan_params, row, symbol, tech_signal
+                        )
+                    else:
+                        signal = None
                 else:
                     # 纯技术指标决策
                     signal = strategy.check_signal(df, scan_params)
@@ -361,4 +375,77 @@ class StrategyRunner:
             }
         except Exception as e:
             logger.error(f"AI 决策失败: {e}")
+            return None
+
+    async def _ai_decide_hybrid(self, strategy, df, params, row, symbol, tech_signal) -> dict | None:
+        """混合决策模式：技术信号 + AI 二次确认"""
+        try:
+            from ai.analyzer import AIAnalyzer
+            analyzer = AIAnalyzer()
+
+            oi_data = None
+            try:
+                oi_data = self.client.get_open_interest(symbol)
+            except Exception:
+                pass
+
+            indicators = strategy.compute_indicators(df, params, oi_data=oi_data)
+            ai_prompt = row["ai_prompt"] or ""
+            min_confidence = row["ai_min_confidence"]
+
+            result = await analyzer.analyze_with_signal(
+                symbol=symbol,
+                indicators=indicators,
+                strategy_name=strategy.name,
+                technical_signal=tech_signal,
+                custom_prompt=ai_prompt,
+            )
+
+            if not result:
+                return None
+
+            direction = result.get("direction", "idle").lower()
+            confidence = result.get("confidence", 0)
+            reasoning = result.get("reasoning", "")
+
+            logger.info(
+                f"🤖 AI 确认 | {symbol} | 技术:{tech_signal['direction']} → AI:{direction} | "
+                f"置信度: {confidence}% | {reasoning[:50]}"
+            )
+
+            if direction == "idle" or confidence < min_confidence:
+                return None
+
+            closes = df["close"].values
+            price = closes[-1]
+            atr_pct = params.get("fixed_tp", 1.4)
+
+            if direction == tech_signal.get("direction"):
+                tp_price = tech_signal.get("tp_price", 0) or price * (1 + atr_pct / 100)
+                sl_price = tech_signal.get("sl_price", 0) or price * (1 - atr_pct * 0.7 / 100)
+            else:
+                if direction == "short":
+                    tp_price = price * (1 - atr_pct / 100)
+                    sl_price = price * (1 + atr_pct * 0.7 / 100)
+                else:
+                    tp_price = price * (1 + atr_pct / 100)
+                    sl_price = price * (1 - atr_pct * 0.7 / 100)
+
+            def fmt_price(p: float) -> float:
+                if p >= 1:
+                    return round(p, 4)
+                elif p >= 0.01:
+                    return round(p, 6)
+                else:
+                    return round(p, 8)
+
+            return {
+                "direction": direction,
+                "price": fmt_price(price),
+                "tp_price": fmt_price(tp_price),
+                "sl_price": fmt_price(sl_price),
+                "reason": f"🔀 HYBRID {direction.upper()} | 技术:{tech_signal['direction']}→AI:{direction} | 置信度 {confidence}% | {reasoning[:30]}",
+            }
+        except Exception as e:
+            logger.error(f"混合决策失败: {e}")
             return None
