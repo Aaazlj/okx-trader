@@ -5,6 +5,7 @@ OKX 交易所客户端封装
 import time
 from datetime import timedelta, timezone
 
+import httpx
 import pandas as pd
 from okx import MarketData, PublicData, Account, Trade
 
@@ -455,4 +456,39 @@ class OKXClient:
             "ask": float(asks[0][0]) if asks else 0,
             "bid": float(bids[0][0]) if bids else 0,
         }
+
+    def get_open_interest(self, inst_id: str, inst_type: str = "SWAP") -> dict | None:
+        """获取合约持仓量（Open Interest）
+
+        调用 OKX Rubik Stat 接口，返回最新 OI 数据。
+        """
+        ccy = inst_id.split("-")[0]
+        url = "https://www.okx.com/api/v5/rubik/stat/contracts/open-interest"
+        params = {"ccy": ccy, "instType": inst_type}
+
+        try:
+            proxy = config.HTTPS_PROXY or config.HTTP_PROXY or None
+            with httpx.Client(proxy=proxy, timeout=10) as client:
+                resp = client.get(url, params=params)
+                resp.raise_for_status()
+                result = resp.json()
+
+            if result.get("code") != "0":
+                logger.warning(f"获取OI失败 {inst_id}: {result.get('msg', '')}")
+                return None
+
+            data = result.get("data", [])
+            if not data:
+                logger.warning(f"OI数据为空 {inst_id}")
+                return None
+
+            latest = data[0]
+            return {
+                "oi": float(latest["oi"]),
+                "oiCcy": float(latest["oiCcy"]),
+                "ts": int(latest["ts"]),
+            }
+        except Exception as e:
+            logger.warning(f"获取OI异常 {inst_id}: {e}")
+            return None
 
