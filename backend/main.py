@@ -1,6 +1,7 @@
 """
 OKX 自动交易系统 — FastAPI 入口
 """
+import asyncio
 import traceback
 from pathlib import Path
 from contextlib import asynccontextmanager
@@ -17,7 +18,7 @@ from exchange.okx_client import OKXClient
 from db.database import get_db, close_db
 from ws import ws_manager
 
-from api import account, positions, strategies, market, settings
+from api import account, positions, strategies, market, settings, auth
 
 logger = get_logger("main")
 
@@ -107,6 +108,7 @@ app = FastAPI(
 
 # 全局异常日志中间件（必须在 CORS 之前添加）
 app.add_middleware(ErrorLoggingMiddleware)
+app.add_middleware(auth.PanelAuthMiddleware)
 
 # CORS（开发阶段允许前端跨域）
 app.add_middleware(
@@ -123,6 +125,7 @@ app.include_router(positions.router)
 app.include_router(strategies.router)
 app.include_router(market.router)
 app.include_router(settings.router)
+app.include_router(auth.router)
 
 
 # 全局异常处理器（捕获路由内抛出的异常）
@@ -141,17 +144,34 @@ async def global_exception_handler(request: Request, exc: Exception):
 # WebSocket 端点
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
+    auth_expires_at = auth.session_expires_at(websocket.cookies)
+    if auth.is_auth_enabled() and auth_expires_at is None:
+        await websocket.close(code=1008)
+        return
     await ws_manager.connect(websocket)
     try:
         while True:
-            # 保持连接，接收客户端心跳
-            data = await websocket.receive_text()
+            timeout = None
+            if auth_expires_at is not None:
+                timeout = auth_expires_at - auth._now()
+                if timeout <= 0:
+                    await websocket.close(code=1008)
+                    return
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=timeout)
+            except asyncio.TimeoutError:
+                await websocket.close(code=1008)
+                return
+            if auth.is_auth_enabled() and auth.session_expires_at(websocket.cookies) is None:
+                await websocket.close(code=1008)
+                return
             if data == "ping":
                 await websocket.send_text("pong")
     except WebSocketDisconnect:
-        ws_manager.disconnect(websocket)
+        pass
     except Exception as e:
         logger.error(f"WebSocket 异常: {e}")
+    finally:
         ws_manager.disconnect(websocket)
 
 

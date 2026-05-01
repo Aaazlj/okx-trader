@@ -238,8 +238,9 @@ pnpm dev                   # → http://localhost:5173
 | `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | 可选 |
 | `TELEGRAM_CHAT_ID` | Telegram Chat ID | 可选 |
 | `PORT` | 后端端口 (默认 8000) | 可选 |
+| `ADMIN_PASSWORD` | 面板登录密码；留空或不设置则不启用登录 | 可选 |
 
-> Docker 部署读取根目录 `.env`；本地后端开发通常读取 `backend/.env`。修改 OKX 凭证、模拟盘/实盘模式或 AI 配置后，建议重启后端以确保已初始化的客户端实例同步更新。
+> Docker 部署读取根目录 `.env`；本地后端开发通常读取 `backend/.env`。修改 OKX 凭证、模拟盘/实盘模式、AI 配置或 `ADMIN_PASSWORD` 后，建议重启后端以确保已初始化的客户端实例同步更新。
 
 > API 文档：启动后端后打开 `http://localhost:8000/docs` 查看完整 Swagger UI
 

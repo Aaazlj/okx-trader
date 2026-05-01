@@ -33,6 +33,7 @@ OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 # 服务配置
 # ═══════════════════════════════════════════
 PORT = int(os.getenv("PORT", "8000"))
+ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "")
 
 # ═══════════════════════════════════════════
 # Telegram 通知
