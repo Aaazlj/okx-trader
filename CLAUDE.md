@@ -65,3 +65,6 @@ data/logs/error_*.log
 
 - Official OKX v5 documentation: [https://www.okx.com/docs-v5/en/](https://www.okx.com/docs-v5/en/)
 - If Context7 MCP is available, when dealing with OKX API / `python-okx` SDK parameters, response fields, error codes, `flag`, order endpoints, or market data endpoints, you may also use Context7 to check the latest documentation.
+
+## Documentation Updates
+After every code change, check and update README.md as needed to ensure that features, configuration, commands, environment variables, and deployment methods remain consistent with the current code.
