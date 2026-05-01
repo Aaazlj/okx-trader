@@ -61,7 +61,7 @@ def _read_env() -> dict[str, str]:
     """读取 .env 文件为字典"""
     env = {}
     if ENV_PATH.exists():
-        for line in ENV_PATH.read_text().splitlines():
+        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
@@ -77,7 +77,7 @@ def _write_env(env: dict[str, str]):
     existing_keys = set()
 
     if ENV_PATH.exists():
-        for line in ENV_PATH.read_text().splitlines():
+        for line in ENV_PATH.read_text(encoding="utf-8").splitlines():
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 lines.append(line)
@@ -103,7 +103,7 @@ def _write_env(env: dict[str, str]):
         for key in sorted(new_keys):
             lines.append(f"{key}={env[key]}")
 
-    ENV_PATH.write_text("\n".join(lines) + "\n")
+    ENV_PATH.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 # ═══════════════════════════════════════════
