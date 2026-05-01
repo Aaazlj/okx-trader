@@ -75,6 +75,7 @@ export const useTradingStore = defineStore('trading', () => {
 
   let ws: WebSocket | null = null
   let reconnectTimer: number | null = null
+  let shouldReconnect = false
 
   async function fetchAccount() {
     try {
@@ -163,6 +164,7 @@ export const useTradingStore = defineStore('trading', () => {
   }
 
   function connectWS() {
+    shouldReconnect = true
     if (ws) return
 
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -210,8 +212,10 @@ export const useTradingStore = defineStore('trading', () => {
     ws.onclose = () => {
       wsConnected.value = false
       ws = null
-      addLog('info', 'WebSocket 已断开，5秒后重连...')
-      reconnectTimer = window.setTimeout(() => connectWS(), 5000)
+      if (shouldReconnect) {
+        addLog('info', 'WebSocket 已断开，5秒后重连...')
+        reconnectTimer = window.setTimeout(() => connectWS(), 5000)
+      }
     }
 
     ws.onerror = () => {
@@ -220,7 +224,11 @@ export const useTradingStore = defineStore('trading', () => {
   }
 
   function disconnectWS() {
-    if (reconnectTimer) clearTimeout(reconnectTimer)
+    shouldReconnect = false
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     ws?.close()
     ws = null
   }

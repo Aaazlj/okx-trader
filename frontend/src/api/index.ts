@@ -5,6 +5,36 @@ const api = axios.create({
   timeout: 15000,
 })
 
+type UnauthorizedHandler = (() => void) | null
+
+let unauthorizedHandler: UnauthorizedHandler = null
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler) {
+  unauthorizedHandler = handler
+}
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      unauthorizedHandler?.()
+    }
+    return Promise.reject(error)
+  },
+)
+
+export interface AuthStatus {
+  enabled: boolean
+  authenticated: boolean
+}
+
+// ═══════════════════════════════════════════
+// 面板登录
+// ═══════════════════════════════════════════
+
+export const getAuthStatus = () => api.get<AuthStatus>('/auth/status')
+export const login = (password: string) => api.post('/auth/login', { password })
+
 // ═══════════════════════════════════════════
 // 账户
 // ═══════════════════════════════════════════
