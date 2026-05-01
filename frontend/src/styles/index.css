@@ -117,6 +117,14 @@ body {
   letter-spacing: -0.02em;
 }
 
+.app-header .app-logo {
+  width: 34px;
+  height: 34px;
+  display: block;
+  cursor: pointer;
+  object-fit: contain;
+}
+
 .app-header .mode-badge {
   padding: 4px 12px;
   border-radius: 20px;

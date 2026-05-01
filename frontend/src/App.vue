@@ -3,6 +3,8 @@ import { onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useTradingStore } from './stores/trading'
 
+const logoUrl = new URL('./assets/logo.svg', import.meta.url).href
+
 const store = useTradingStore()
 const route = useRoute()
 const router = useRouter()
@@ -39,7 +41,8 @@ function goBack() {
         >
           <el-icon><ArrowLeft /></el-icon>
         </el-button>
-        <h1 @click="goBack" style="cursor: pointer">⚡ OKX 自动交易系统</h1>
+        <img class="app-logo" :src="logoUrl" alt="OKX Trader" @click="goBack" />
+        <h1 @click="goBack" style="cursor: pointer">OKX 自动交易系统</h1>
       </div>
       <div style="display: flex; align-items: center; gap: 12px">
         <span

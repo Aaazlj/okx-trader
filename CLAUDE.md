@@ -58,8 +58,10 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 
 **These guidelines are working if:** fewer unnecessary changes in diffs, fewer rewrites due to overcomplication, and clarifying questions come before implementation rather than after mistakes.
 
-## SKILLS
-OKX API: ~/.claude/skills/okx/SKILL.md
-
 ## ERROR LOGS
 data/logs/error_*.log
+
+## OKX API Calling Conventions
+
+- Official OKX v5 documentation: [https://www.okx.com/docs-v5/en/](https://www.okx.com/docs-v5/en/)
+- If Context7 MCP is available, when dealing with OKX API / `python-okx` SDK parameters, response fields, error codes, `flag`, order endpoints, or market data endpoints, you may also use Context7 to check the latest documentation.
