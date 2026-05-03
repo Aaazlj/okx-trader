@@ -7,6 +7,7 @@ import aiosqlite
 from pathlib import Path
 
 import config
+from analysis.history import init_analysis_history_table
 from utils.logger import get_logger
 
 logger = get_logger("Database")
@@ -120,6 +121,7 @@ async def _init_tables(db: aiosqlite.Connection):
         );
     """)
     await db.commit()
+    await init_analysis_history_table(db)
 
     # 兼容旧库：给 trades 表补充 peak_pnl/trough_pnl 列
     await _ensure_column(db, "trades", "peak_pnl", "REAL DEFAULT 0")

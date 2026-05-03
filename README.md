@@ -38,7 +38,7 @@
 
 ## 项目简介
 
-**OKX Trader** 是一套面向 OKX 永续合约的**自动量化交易系统**。它内置 **11 个已注册的 strategy_type**，支持**纯技术指标 / AI 驱动 / 混合决策**三种模式，配备 Web 管理面板、实时 WebSocket 推送、SQLite 持久化和基础风控能力。
+**OKX Trader** 是一套面向 OKX 永续合约的**自动量化交易系统**。它内置 **11 个已注册的 strategy_type**，支持**纯技术指标 / AI 驱动 / 混合决策**三种模式，配备 Web 管理面板、实时 WebSocket 推送、SQLite 持久化、基础风控能力和永续合约智能分析报告。
 
 核心链路：行情数据 → 技术指标 / AI 分析 → 策略信号 → 风控检查 → 订单执行 → 持仓监控 → 前端实时展示。
 
@@ -264,8 +264,31 @@ pnpm dev                   # → http://localhost:5173
 |:---|:---|
 | **Dashboard** | 账户总览 · 策略网格 · 实时 PnL · 一键启停 · 模式切换 |
 | **Strategy Detail** | PnL 曲线 (ECharts) · 信号历史 · 持仓追踪 · 胜率统计 |
+| **Perpetual Analysis** | 交易对选择 · OKX 实时数据拉取 · 综合评分 · 规则触发明细 · 多周期/支撑压力/资金费率/OI/成交量/情绪/订单簿/机构行为/市场阶段/策略匹配/风险收益比/多角色/冲突/交易计划分析 · AI 完整报告 |
+| **Analysis History** | 自动保存完整分析快照 · 交易对/时间筛选 · 历史报告详情 · 当前实时价对比 · 同币种评分变化 · K 线复盘关键价位 · 备注 |
 | **Settings** | OKX API 配置 · AI API 配置 · Telegram 通知 · 连通性测试 |
 | **Log Viewer** | 实时日志推流 · 分类过滤 (信号 / 交易 / 错误) |
+
+永续合约智能分析入口在顶部导航的分析按钮，接口为 `POST /api/perpetual-analysis`，请求体：
+
+```json
+{
+  "symbol": "BTC-USDT-SWAP"
+}
+```
+
+该功能只生成市场状态诊断、风险参考和交易计划草稿，不会触发下单。结构化报告不依赖 AI Key；若配置了 `OPENAI_API_KEY`，后端会额外生成完整自然语言分析报告。每次分析完成后会写入 SQLite 表 `perpetual_analysis_history`，保存完整 JSON 快照（评分、指标、关键价位、AI 报告、交易计划等），并在前端历史页支持筛选、详情查看、评分变化对比、复盘和备注。历史详情复用实时分析报告界面，并额外展示当前实时价对比。前端对该分析接口单独使用 1 小时请求超时，其他面板 API 仍保持 15 秒默认超时。
+
+历史分析相关接口：
+
+| 方法 | 路径 | 用途 |
+|:---|:---|:---|
+| `GET` | `/api/perpetual-analysis/history` | 历史列表，支持 `symbol`、`start`、`end`、`limit`、`offset` |
+| `GET` | `/api/perpetual-analysis/history/{id}` | 完整历史快照，并附带当前实时价对比 |
+| `PATCH` | `/api/perpetual-analysis/history/{id}` | 更新 `note` |
+| `DELETE` | `/api/perpetual-analysis/history/{id}` | 删除指定历史分析记录 |
+| `GET` | `/api/perpetual-analysis/history/score-series` | 同一交易对多次分析评分变化 |
+| `GET` | `/api/perpetual-analysis/history/{id}/replay` | 拉取分析时间点后的 K 线，检查关键价位是否触达 |
 
 ---
 
@@ -281,7 +304,11 @@ okx-trader/
 │   │   ├── positions.py     #   持仓查询
 │   │   ├── strategies.py    #   策略管理
 │   │   ├── market.py        #   行情数据
+│   │   ├── perpetual_analysis.py # 永续合约智能分析
 │   │   └── settings.py      #   系统配置
+│   ├── analysis/
+│   │   ├── perpetual.py     # 永续合约结构化评分与规则引擎
+│   │   └── history.py       # 分析历史持久化、评分序列与复盘计算
 │   ├── core/                # 核心引擎
 │   │   ├── strategy_runner.py   # 策略编排器 (异步轮询)
 │   │   ├── trade_executor.py    # 订单执行 + OCO 挂载

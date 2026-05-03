@@ -1,7 +1,37 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import ElementPlus from 'element-plus'
-import * as ElementPlusIconsVue from '@element-plus/icons-vue'
+import {
+  ElAlert,
+  ElButton,
+  ElDialog,
+  ElDivider,
+  ElForm,
+  ElFormItem,
+  ElIcon,
+  ElInput,
+  ElInputNumber,
+  ElOption,
+  ElProgress,
+  ElRadio,
+  ElRadioGroup,
+  ElSelect,
+  ElSlider,
+  ElSwitch,
+  ElTable,
+  ElTableColumn,
+  ElTag,
+  vLoading,
+} from 'element-plus'
+import {
+  ArrowLeft,
+  Clock,
+  DataAnalysis,
+  Delete,
+  Hide,
+  Refresh,
+  Setting,
+  View,
+} from '@element-plus/icons-vue'
 import 'element-plus/dist/index.css'
 import './styles/index.css'
 import App from './App.vue'
@@ -9,14 +39,44 @@ import router from './router'
 
 const app = createApp(App)
 const pinia = createPinia()
+const elementPlusComponents = [
+  ElAlert,
+  ElButton,
+  ElDialog,
+  ElDivider,
+  ElForm,
+  ElFormItem,
+  ElIcon,
+  ElInput,
+  ElInputNumber,
+  ElOption,
+  ElProgress,
+  ElRadio,
+  ElRadioGroup,
+  ElSelect,
+  ElSlider,
+  ElSwitch,
+  ElTable,
+  ElTableColumn,
+  ElTag,
+]
 
 app.use(pinia)
 app.use(router)
-app.use(ElementPlus)
 
-// 注册所有图标
-for (const [key, component] of Object.entries(ElementPlusIconsVue)) {
-  app.component(key, component)
+for (const component of elementPlusComponents) {
+  app.use(component)
 }
+
+app.directive('loading', vLoading)
+
+app.component('ArrowLeft', ArrowLeft)
+app.component('Clock', Clock)
+app.component('DataAnalysis', DataAnalysis)
+app.component('Delete', Delete)
+app.component('Hide', Hide)
+app.component('Refresh', Refresh)
+app.component('Setting', Setting)
+app.component('View', View)
 
 app.mount('#app')

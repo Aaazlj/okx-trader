@@ -449,6 +449,92 @@ class OKXClient:
             })
         return tickers
 
+    def _public_get(self, path: str, params: dict, retries: int = 3) -> list:
+        """调用 OKX 公共 REST 接口，内置 429/限频重试。"""
+        url = f"https://www.okx.com{path}"
+        proxy = config.HTTPS_PROXY or config.HTTP_PROXY or None
+        last_error = ""
+
+        for attempt in range(retries):
+            try:
+                with httpx.Client(proxy=proxy, timeout=10) as client:
+                    resp = client.get(url, params=params)
+
+                if resp.status_code == 429:
+                    last_error = "HTTP 429"
+                    time.sleep(1.2 * (attempt + 1))
+                    continue
+
+                resp.raise_for_status()
+                result = resp.json()
+                if result.get("code") == "0":
+                    return result.get("data", [])
+
+                last_error = f"code={result.get('code')} msg={result.get('msg', '')}"
+                if result.get("code") == "50011":
+                    time.sleep(1.2 * (attempt + 1))
+                    continue
+                break
+            except Exception as e:
+                last_error = str(e)
+                time.sleep(0.4 * (attempt + 1))
+
+        logger.warning(f"OKX 公共接口请求失败 {path}: {last_error}")
+        return []
+
+    def get_ticker(self, inst_id: str) -> dict | None:
+        """获取单个交易对 ticker。"""
+        data = self._public_get("/api/v5/market/ticker", {"instId": inst_id})
+        if not data:
+            return None
+        ticker = data[0]
+        last = self._safe_float(ticker.get("last"))
+        open_24h = self._safe_float(ticker.get("open24h"))
+        chg_pct = ((last - open_24h) / open_24h * 100) if last is not None and open_24h else 0
+        return {
+            "inst_id": ticker.get("instId", inst_id),
+            "last": last,
+            "open24h": open_24h,
+            "high24h": self._safe_float(ticker.get("high24h")),
+            "low24h": self._safe_float(ticker.get("low24h")),
+            "chg_pct": round(chg_pct, 4),
+            "vol24h": self._safe_float(ticker.get("vol24h")),
+            "vol_ccy_24h": self._safe_float(ticker.get("volCcy24h")),
+            "bid_px": self._safe_float(ticker.get("bidPx")),
+            "ask_px": self._safe_float(ticker.get("askPx")),
+            "ts": int(ticker.get("ts", 0) or 0),
+        }
+
+    def get_funding_rate(self, inst_id: str) -> dict | None:
+        """获取当前资金费率。"""
+        data = self._public_get("/api/v5/public/funding-rate", {"instId": inst_id})
+        if not data:
+            return None
+        item = data[0]
+        return {
+            "funding_rate": self._safe_float(item.get("fundingRate")),
+            "next_funding_rate": self._safe_float(item.get("nextFundingRate"), None),
+            "sett_funding_rate": self._safe_float(item.get("settFundingRate"), None),
+            "funding_time": int(item.get("fundingTime", 0) or 0),
+            "next_funding_time": int(item.get("nextFundingTime", 0) or 0),
+            "ts": int(item.get("ts", 0) or 0),
+        }
+
+    def get_funding_rate_history(self, inst_id: str, limit: int = 30) -> list[dict]:
+        """获取历史资金费率。"""
+        data = self._public_get(
+            "/api/v5/public/funding-rate-history",
+            {"instId": inst_id, "limit": str(limit)},
+        )
+        return [
+            {
+                "funding_rate": self._safe_float(item.get("fundingRate")),
+                "realized_rate": self._safe_float(item.get("realizedRate")),
+                "funding_time": int(item.get("fundingTime", 0) or 0),
+            }
+            for item in data
+        ]
+
     def get_orderbook(self, inst_id: str, sz: str = "1") -> dict:
         """获取盘口数据（用于计算买卖点差）"""
         result = self.market.get_orderbook(instId=inst_id, sz=sz)
@@ -462,6 +548,71 @@ class OKXClient:
             "ask": float(asks[0][0]) if asks else 0,
             "bid": float(bids[0][0]) if bids else 0,
         }
+
+    def get_orderbook_depth(self, inst_id: str, sz: str = "20") -> dict:
+        """获取订单簿前 N 档深度。"""
+        data = self._public_get("/api/v5/market/books", {"instId": inst_id, "sz": sz})
+        if not data:
+            return {"asks": [], "bids": []}
+        item = data[0]
+        return {"asks": item.get("asks", []), "bids": item.get("bids", []), "ts": int(item.get("ts", 0) or 0)}
+
+    def get_recent_trades(self, inst_id: str, limit: int = 100) -> list[dict]:
+        """获取最近成交明细。"""
+        data = self._public_get("/api/v5/market/trades", {"instId": inst_id, "limit": str(limit)})
+        return [
+            {
+                "side": item.get("side", ""),
+                "size": self._safe_float(item.get("sz")),
+                "price": self._safe_float(item.get("px")),
+                "ts": int(item.get("ts", 0) or 0),
+            }
+            for item in data
+        ]
+
+    def get_long_short_account_ratio(self, ccy: str, period: str = "1H") -> list[dict]:
+        """获取多空账户比历史。数据格式: [ts, ratio]。"""
+        data = self._public_get(
+            "/api/v5/rubik/stat/contracts/long-short-account-ratio",
+            {"ccy": ccy, "period": period},
+        )
+        history = []
+        for item in data:
+            if len(item) < 2:
+                continue
+            history.append({"ts": int(item[0]), "ratio": self._safe_float(item[1])})
+        return history
+
+    def get_long_short_position_ratio(self, inst_id: str, period: str = "1H") -> list[dict]:
+        """获取精英交易员多空持仓比历史。数据格式: [ts, ratio]。"""
+        data = self._public_get(
+            "/api/v5/rubik/stat/contracts/long-short-position-ratio-contract-top-trader",
+            {"instId": inst_id, "period": period},
+        )
+        history = []
+        for item in data:
+            if len(item) < 2:
+                continue
+            history.append({"ts": int(item[0]), "ratio": self._safe_float(item[1])})
+        return history
+
+    def get_open_interest_history(self, inst_id: str, period: str = "1H") -> list[dict]:
+        """获取合约持仓量历史。数据格式: [ts, oi, oiCcy, oiUsd]。"""
+        data = self._public_get(
+            "/api/v5/rubik/stat/contracts/open-interest-history",
+            {"instId": inst_id, "period": period},
+        )
+        history = []
+        for item in data:
+            if len(item) < 4:
+                continue
+            history.append({
+                "ts": int(item[0]),
+                "oi": self._safe_float(item[1]),
+                "oi_ccy": self._safe_float(item[2]),
+                "oi_usd": self._safe_float(item[3]),
+            })
+        return history
 
     def get_open_interest(self, inst_id: str) -> dict | None:
         """获取合约持仓量（Open Interest）

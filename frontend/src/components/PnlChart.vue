@@ -1,12 +1,21 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch } from 'vue'
-import * as echarts from 'echarts'
+import { LineChart } from 'echarts/charts'
+import {
+  GridComponent,
+  TitleComponent,
+  TooltipComponent,
+} from 'echarts/components'
+import { graphic, init, use, type ECharts, type EChartsCoreOption } from 'echarts/core'
+import { CanvasRenderer } from 'echarts/renderers'
 import { getStrategyPnl } from '../api'
+
+use([LineChart, GridComponent, TitleComponent, TooltipComponent, CanvasRenderer])
 
 const props = defineProps<{ strategyId: string }>()
 
 const chartRef = ref<HTMLElement>()
-let chart: echarts.ECharts | null = null
+let chart: ECharts | null = null
 
 const pnlData = ref<any>(null)
 
@@ -24,7 +33,7 @@ function renderChart() {
   if (!chartRef.value || !pnlData.value) return
 
   if (!chart) {
-    chart = echarts.init(chartRef.value)
+    chart = init(chartRef.value)
   }
 
   const points = pnlData.value.points || []
@@ -44,7 +53,7 @@ function renderChart() {
   const xData = points.map((p: any) => p.time)
   const yData = points.map((p: any) => p.pnl)
 
-  const option: echarts.EChartsOption = {
+  const option: EChartsCoreOption = {
     backgroundColor: 'transparent',
     grid: { top: 40, right: 24, bottom: 32, left: 60 },
     tooltip: {
@@ -91,15 +100,10 @@ function renderChart() {
           color: (params: any) => (params.value >= 0 ? '#3A8A3A' : '#C44A3A'),
         },
         areaStyle: {
-          color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          color: new graphic.LinearGradient(0, 0, 0, 1, [
             { offset: 0, color: 'rgba(196,144,96,0.18)' },
             { offset: 1, color: 'rgba(196,144,96,0.02)' },
           ]),
-        },
-        markLine: {
-          silent: true,
-          data: [{ yAxis: 0, lineStyle: { color: '#E8DFD5', type: 'dashed' } }],
-          label: { show: false },
         },
       },
     ],

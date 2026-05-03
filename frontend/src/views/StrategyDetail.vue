@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useTradingStore } from '../stores/trading'
@@ -11,10 +11,10 @@ import {
   startStrategy,
   stopStrategy,
 } from '../api'
-import PnlChart from '../components/PnlChart.vue'
 
 const route = useRoute()
 const store = useTradingStore()
+const PnlChart = defineAsyncComponent(() => import('../components/PnlChart.vue'))
 
 const strategyId = computed(() => route.params.id as string)
 const strategy = ref<any>(null)

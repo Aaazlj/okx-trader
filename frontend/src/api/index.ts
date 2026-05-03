@@ -5,6 +5,8 @@ const api = axios.create({
   timeout: 15000,
 })
 
+const PERPETUAL_ANALYSIS_TIMEOUT_MS = 60 * 60 * 1000
+
 type UnauthorizedHandler = (() => void) | null
 
 let unauthorizedHandler: UnauthorizedHandler = null
@@ -66,6 +68,20 @@ export const getStrategyPnl = (id: string) => api.get(`/strategies/${id}/pnl`)
 export const getSymbols = () => api.get('/symbols')
 export const getTradeHistory = (limit = 50, strategyId?: string) =>
   api.get('/trades/history', { params: { limit, strategy_id: strategyId } })
+export const analyzePerpetual = (symbol: string) =>
+  api.post('/perpetual-analysis', { symbol }, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
+export const getPerpetualAnalysisHistory = (params: any = {}) =>
+  api.get('/perpetual-analysis/history', { params })
+export const getPerpetualAnalysisHistoryDetail = (id: number | string) =>
+  api.get(`/perpetual-analysis/history/${id}`)
+export const updatePerpetualAnalysisHistory = (id: number | string, data: any) =>
+  api.patch(`/perpetual-analysis/history/${id}`, data)
+export const deletePerpetualAnalysisHistory = (id: number | string) =>
+  api.delete(`/perpetual-analysis/history/${id}`)
+export const getPerpetualAnalysisScoreSeries = (symbol: string, limit = 30) =>
+  api.get('/perpetual-analysis/history/score-series', { params: { symbol, limit } })
+export const replayPerpetualAnalysisHistory = (id: number | string, bar = '1H', limit = 100) =>
+  api.get(`/perpetual-analysis/history/${id}/replay`, { params: { bar, limit } })
 
 // ═══════════════════════════════════════════
 // 系统配置

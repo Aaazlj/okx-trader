@@ -13,6 +13,7 @@ const router = useRouter()
 
 const isDetailPage = computed(() => route.name === 'strategy-detail')
 const isSettingsPage = computed(() => route.name === 'settings')
+const isAnalysisArea = computed(() => String(route.name || '').startsWith('perpetual-analysis'))
 const authLoaded = ref(false)
 const authEnabled = ref(false)
 const authenticated = ref(false)
@@ -167,15 +168,35 @@ function goBack() {
           >
             ● {{ store.wsConnected ? '已连接' : '未连接' }}
           </span>
-          <el-button
-            size="small"
-            circle
-            :type="isSettingsPage ? 'primary' : 'default'"
-            @click="router.push('/settings')"
-            title="系统设置"
-          >
-            <el-icon><Setting /></el-icon>
-          </el-button>
+          <div>
+            <el-button
+              size="small"
+              circle
+              :type="isAnalysisArea ? 'primary' : 'default'"
+              @click="router.push('/analysis')"
+              title="永续合约分析"
+            >
+              <el-icon><DataAnalysis /></el-icon>
+            </el-button>
+            <el-button
+              size="small"
+              circle
+              :type="route.name === 'perpetual-analysis-history' ? 'primary' : 'default'"
+              @click="router.push('/analysis/history')"
+              title="分析历史"
+            >
+              <el-icon><Clock /></el-icon>
+            </el-button>
+            <el-button
+              size="small"
+              circle
+              :type="isSettingsPage ? 'primary' : 'default'"
+              @click="router.push('/settings')"
+              title="系统设置"
+            >
+              <el-icon><Setting /></el-icon>
+            </el-button>
+          </div>
         </div>
       </header>
       <router-view />

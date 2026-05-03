@@ -18,7 +18,7 @@ from exchange.okx_client import OKXClient
 from db.database import get_db, close_db
 from ws import ws_manager
 
-from api import account, positions, strategies, market, settings, auth
+from api import account, positions, strategies, market, settings, auth, perpetual_analysis
 
 logger = get_logger("main")
 
@@ -75,6 +75,7 @@ async def lifespan(app: FastAPI):
         account.set_client(okx_client)
         positions.set_client(okx_client)
         market.set_client(okx_client)
+        perpetual_analysis.set_client(okx_client)
         strategies.set_client(okx_client)
     except Exception as e:
         logger.error(f"OKX 客户端初始化失败: {e}\n{traceback.format_exc()}")
@@ -124,6 +125,7 @@ app.include_router(account.router)
 app.include_router(positions.router)
 app.include_router(strategies.router)
 app.include_router(market.router)
+app.include_router(perpetual_analysis.router)
 app.include_router(settings.router)
 app.include_router(auth.router)
 
