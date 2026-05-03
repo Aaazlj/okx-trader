@@ -32,3 +32,6 @@ outputs/
 docs/
 .serena/
 .worktrees/
+.agents/
+.claude/
+skills-lock.json
