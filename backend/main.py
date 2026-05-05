@@ -18,7 +18,7 @@ from exchange.okx_client import OKXClient
 from db.database import get_db, close_db
 from ws import ws_manager
 
-from api import account, positions, strategies, market, settings, auth, perpetual_analysis, martingale, backtests
+from api import account, positions, strategies, market, settings, auth, perpetual_analysis, martingale, contract_grid, backtests
 
 logger = get_logger("main")
 
@@ -128,6 +128,7 @@ app.include_router(strategies.router)
 app.include_router(market.router)
 app.include_router(perpetual_analysis.router)
 app.include_router(martingale.router)
+app.include_router(contract_grid.router)
 app.include_router(backtests.router)
 app.include_router(settings.router)
 app.include_router(auth.router)

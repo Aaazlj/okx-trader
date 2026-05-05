@@ -8,6 +8,7 @@ from pathlib import Path
 
 import config
 from analysis.history import init_analysis_history_table
+from strategies.contract_grid import DEFAULT_CONTRACT_GRID_PARAMS
 from strategies.martingale_contract import DEFAULT_MARTINGALE_PARAMS
 from utils.logger import get_logger
 
@@ -192,6 +193,24 @@ async def _init_tables(db: aiosqlite.Connection):
 
         CREATE INDEX IF NOT EXISTS idx_martingale_backtest_records_symbol_created
             ON martingale_backtest_records(symbol, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS contract_grid_backtest_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id TEXT DEFAULT 'contract_grid',
+            symbol TEXT NOT NULL,
+            cycle TEXT NOT NULL,
+            bar TEXT NOT NULL,
+            start_ts INTEGER NOT NULL,
+            end_ts INTEGER NOT NULL,
+            candle_count INTEGER NOT NULL,
+            params_json TEXT NOT NULL,
+            summary_json TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_contract_grid_backtest_records_symbol_created
+            ON contract_grid_backtest_records(symbol, created_at DESC);
     """)
     await db.commit()
     await init_analysis_history_table(db)
@@ -210,7 +229,9 @@ async def _init_tables(db: aiosqlite.Connection):
         await _seed_default_strategies(db)
     else:
         await _seed_missing_martingale_strategy(db)
+        await _seed_missing_contract_grid_strategy(db)
     await _migrate_martingale_params(db)
+    await _migrate_contract_grid_params(db)
 
 
 async def _seed_missing_martingale_strategy(db: aiosqlite.Connection):
@@ -230,6 +251,28 @@ async def _seed_missing_martingale_strategy(db: aiosqlite.Connection):
             DEFAULT_MARTINGALE_PARAMS["initial_margin_usdt"],
             60,
             json.dumps(DEFAULT_MARTINGALE_PARAMS, ensure_ascii=False),
+        ),
+    )
+    await db.commit()
+
+
+async def _seed_missing_contract_grid_strategy(db: aiosqlite.Connection):
+    """兼容旧库：只补合约网格策略，不覆盖已有策略配置。"""
+    await db.execute(
+        """INSERT OR IGNORE INTO strategies
+           (id, name, strategy_type, decision_mode, symbols, leverage,
+            order_amount_usdt, poll_interval, params)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "contract_grid",
+            "合约网格",
+            "contract_grid",
+            "technical",
+            json.dumps(["BTC-USDT-SWAP"]),
+            DEFAULT_CONTRACT_GRID_PARAMS["leverage"],
+            DEFAULT_CONTRACT_GRID_PARAMS["total_margin_usdt"],
+            300,
+            json.dumps(DEFAULT_CONTRACT_GRID_PARAMS, ensure_ascii=False),
         ),
     )
     await db.commit()
@@ -256,6 +299,34 @@ async def _migrate_martingale_params(db: aiosqlite.Connection):
             (
                 json.dumps(params, ensure_ascii=False),
                 params["initial_margin_usdt"],
+                row["id"],
+            ),
+        )
+    await db.commit()
+
+
+async def _migrate_contract_grid_params(db: aiosqlite.Connection):
+    """把合约网格参数收敛到当前字段。"""
+    from strategies.contract_grid import normalize_contract_grid_params
+
+    cursor = await db.execute(
+        "SELECT id, params FROM strategies WHERE strategy_type = 'contract_grid'"
+    )
+    rows = await cursor.fetchall()
+    for row in rows:
+        try:
+            raw_params = json.loads(row["params"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            raw_params = {}
+        params = normalize_contract_grid_params(raw_params)
+        await db.execute(
+            """UPDATE strategies
+               SET params = ?, order_amount_usdt = ?, leverage = ?, is_active = 0, updated_at = datetime('now')
+               WHERE id = ?""",
+            (
+                json.dumps(params, ensure_ascii=False),
+                params["total_margin_usdt"],
+                params["leverage"],
                 row["id"],
             ),
         )
@@ -462,6 +533,17 @@ async def _seed_default_strategies(db: aiosqlite.Connection):
             "order_amount_usdt": DEFAULT_MARTINGALE_PARAMS["initial_margin_usdt"],
             "poll_interval": 60,
             "params": json.dumps(DEFAULT_MARTINGALE_PARAMS, ensure_ascii=False),
+        },
+        {
+            "id": "contract_grid",
+            "name": "合约网格",
+            "strategy_type": "contract_grid",
+            "decision_mode": "technical",
+            "symbols": json.dumps(["BTC-USDT-SWAP"]),
+            "leverage": DEFAULT_CONTRACT_GRID_PARAMS["leverage"],
+            "order_amount_usdt": DEFAULT_CONTRACT_GRID_PARAMS["total_margin_usdt"],
+            "poll_interval": 300,
+            "params": json.dumps(DEFAULT_CONTRACT_GRID_PARAMS, ensure_ascii=False),
         },
         # ═══════════════════════════════════════════
         # ai-bian AI 驱动策略

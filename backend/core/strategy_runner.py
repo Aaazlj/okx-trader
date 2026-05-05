@@ -117,6 +117,9 @@ class StrategyRunner:
             return
 
         strategy_type = row["strategy_type"]
+        if strategy_type == "contract_grid":
+            logger.info(f"合约网格策略仅支持配置和回测，跳过实盘扫描: {strategy_id}")
+            return
         is_martingale = strategy_type == "martingale_contract"
         symbols = json.loads(row["symbols"])
         decision_mode = row["decision_mode"]

@@ -248,6 +248,50 @@ class AIAnalyzer:
             logger.error(f"AI 马丁格尔参数生成异常: {e}")
             return None
 
+    async def generate_contract_grid_params(self, request: dict) -> dict | None:
+        """生成合约网格策略参数 JSON。"""
+        if not self.api_key:
+            logger.warning("AI API Key 未配置，无法生成合约网格参数")
+            return None
+
+        prompt = self._build_contract_grid_params_prompt(request)
+        try:
+            async with httpx.AsyncClient(timeout=45) as client:
+                response = await client.post(
+                    f"{self.api_url}/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "你是风控优先的加密货币永续合约网格参数助手，只输出 JSON。",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.2,
+                        "max_tokens": 800,
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+
+            if response.status_code != 200:
+                logger.error(f"AI 网格参数请求失败: HTTP {response.status_code} {response.text[:200]}")
+                return None
+
+            result = response.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            return json.loads(self._extract_json(content))
+        except json.JSONDecodeError:
+            logger.error("AI 合约网格参数 JSON 解析失败")
+            return None
+        except Exception as e:
+            logger.error(f"AI 合约网格参数生成异常: {e}")
+            return None
+
     def _build_hybrid_prompt(
         self, symbol: str, indicators: dict, strategy_name: str,
         technical_signal: dict, custom_prompt: str
@@ -400,6 +444,34 @@ max_position_usdt, initial_margin_usdt, add_margin_usdt, max_add_count, fee_rate
 - 若使用 pct，add_trigger_value 建议 0.5-8，take_profit_value 建议 0.2-5。
 - initial_margin_usdt + add_margin_usdt * max_add_count 不应明显超过 max_position_usdt。
 - max_add_count 建议 3-8。
+- risk 必须包含 max_concurrent, max_daily_per_symbol, max_daily_loss_pct。
+- 不要输出说明文字。
+""".strip()
+
+    def _build_contract_grid_params_prompt(self, request: dict) -> str:
+        return f"""
+请为 OKX USDT 永续合约网格策略生成一组简洁、保守参数。
+
+输入：
+- symbol: {request.get("symbol")}
+- cycle: {request.get("cycle")}
+- grid_mode: {request.get("grid_mode")}
+- risk_profile: {request.get("risk_profile")}
+- total_margin_usdt: {request.get("total_margin_usdt")}
+
+只输出 JSON 对象，字段必须包含：
+cycle, grid_mode, lower_price, upper_price, grid_count, total_margin_usdt,
+leverage, mgn_mode, stop_lower_price, stop_upper_price, fee_rate, slippage_pct, risk。
+
+约束：
+- cycle 只能是 "short"、"medium" 或 "long"。
+- grid_mode 只能是 "neutral"、"long" 或 "short"。
+- lower_price 必须大于 0，upper_price 必须大于 lower_price。
+- stop_lower_price 必须低于 lower_price，stop_upper_price 必须高于 upper_price。
+- grid_count 建议 8-80，风险越高网格数越少。
+- leverage 建议 1-5，风险越高杠杆越低。
+- mgn_mode 默认 "cross"，也可输出 "isolated"。
+- total_margin_usdt 不应明显超过输入的 total_margin_usdt。
 - risk 必须包含 max_concurrent, max_daily_per_symbol, max_daily_loss_pct。
 - 不要输出说明文字。
 """.strip()

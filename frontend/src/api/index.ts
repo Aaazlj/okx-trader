@@ -63,7 +63,9 @@ export const getStrategySignals = (id: string, limit = 200) =>
   api.get(`/strategies/${id}/signals`, { params: { limit } })
 export const getStrategyPnl = (id: string) => api.get(`/strategies/${id}/pnl`)
 export const generateMartingaleParams = (data: any) => api.post('/martingale/params/generate', data)
+export const generateContractGridParams = (data: any) => api.post('/contract-grid/params/generate', data)
 export const runMartingaleBacktest = (data: any) => api.post('/backtests/martingale', data, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
+export const runContractGridBacktest = (data: any) => api.post('/backtests/contract-grid', data, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
 export const downloadBacktestCandles = (data: any) =>
   api.post('/backtests/candles/download', data, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
 export const getBacktestCandleCoverage = (params: any) =>
@@ -72,6 +74,10 @@ export const getMartingaleBacktestRecords = (params: any = {}) =>
   api.get('/backtests/martingale/records', { params })
 export const getMartingaleBacktestRecord = (id: number | string) =>
   api.get(`/backtests/martingale/records/${id}`)
+export const getContractGridBacktestRecords = (params: any = {}) =>
+  api.get('/backtests/contract-grid/records', { params })
+export const getContractGridBacktestRecord = (id: number | string) =>
+  api.get(`/backtests/contract-grid/records/${id}`)
 
 // ═══════════════════════════════════════════
 // 市场

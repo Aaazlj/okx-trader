@@ -10,9 +10,11 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from core.contract_grid_backtester import run_contract_grid_backtest
 from core.martingale_backtester import run_martingale_backtest
 from db.database import get_db
 from exchange.okx_client import OKXClient
+from strategies.contract_grid import normalize_contract_grid_params
 from strategies.martingale_contract import normalize_martingale_params
 from utils.logger import get_logger
 
@@ -37,10 +39,24 @@ class MartingaleBacktestRequest(BaseModel):
     slippage_pct: float = Field(default=0.02, ge=0, le=2)
 
 
+class ContractGridBacktestRequest(BaseModel):
+    strategy_id: str = "contract_grid"
+    symbol: str
+    cycle: str = "medium"
+    bar: str | None = None
+    start: str | None = None
+    end: str | None = None
+    params: dict = Field(default_factory=dict)
+    leverage: int = Field(default=3, ge=1, le=100)
+    fee_rate: float = Field(default=0.0005, ge=0, le=0.01)
+    slippage_pct: float = Field(default=0.02, ge=0, le=2)
+
+
 class CandleDownloadRequest(BaseModel):
     symbol: str
     cycle: str = "medium"
     bar: str | None = None
+    strategy_type: str = "martingale_contract"
     start: str
     end: str | None = None
 
@@ -57,7 +73,7 @@ async def download_backtest_candles(data: CandleDownloadRequest):
         raise HTTPException(status_code=503, detail="OKX 客户端未初始化")
 
     symbol = _normalize_symbol(data.symbol)
-    params = _normalized_cycle_params(data.cycle, data.bar)
+    params = _normalized_cycle_params(data.cycle, data.bar, data.strategy_type)
     bar = params["bar"]
     start_ms, end_ms = _resolve_range(data.start, data.end, bar)
 
@@ -90,12 +106,13 @@ async def get_backtest_candle_coverage(
     symbol: str,
     cycle: str = "medium",
     bar: str | None = None,
+    strategy_type: str = "martingale_contract",
     start: str | None = None,
     end: str | None = None,
 ):
     """查询本地回测 K 线缓存覆盖情况。"""
     normalized_symbol = _normalize_symbol(symbol)
-    params = _normalized_cycle_params(cycle, bar)
+    params = _normalized_cycle_params(cycle, bar, strategy_type)
     start_ms, end_ms = _resolve_range(start, end, params["bar"])
     db = await get_db()
     return await _build_coverage_response(db, normalized_symbol, params, start_ms, end_ms)
@@ -152,6 +169,59 @@ async def get_martingale_backtest_record(record_id: int):
     if row is None:
         raise HTTPException(status_code=404, detail="回测记录不存在")
     return _record_detail(row)
+
+
+@router.get("/contract-grid/records")
+async def list_contract_grid_backtest_records(
+    symbol: str | None = None,
+    limit: int = Query(30, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+):
+    """查询合约网格回测历史记录。"""
+    db = await get_db()
+    where = ""
+    params: list[Any] = []
+    if symbol:
+        where = "WHERE symbol = ?"
+        params.append(_normalize_symbol(symbol))
+
+    cursor = await db.execute(
+        f"""
+        SELECT id, strategy_id, symbol, cycle, bar, start_ts, end_ts,
+               candle_count, summary_json, created_at
+        FROM contract_grid_backtest_records
+        {where}
+        ORDER BY created_at DESC, id DESC
+        LIMIT ? OFFSET ?
+        """,
+        (*params, limit, offset),
+    )
+    rows = await cursor.fetchall()
+    total_cursor = await db.execute(
+        f"SELECT COUNT(*) AS total FROM contract_grid_backtest_records {where}",
+        params,
+    )
+    total = (await total_cursor.fetchone())["total"]
+    return {
+        "items": [_grid_record_summary(row) for row in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/contract-grid/records/{record_id}")
+async def get_contract_grid_backtest_record(record_id: int):
+    """查询单条合约网格回测记录详情。"""
+    db = await get_db()
+    cursor = await db.execute(
+        "SELECT * FROM contract_grid_backtest_records WHERE id = ?",
+        (record_id,),
+    )
+    row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="回测记录不存在")
+    return _grid_record_detail(row)
 
 
 @router.post("/martingale")
@@ -211,10 +281,75 @@ async def backtest_martingale(data: MartingaleBacktestRequest):
         raise HTTPException(status_code=500, detail=f"回测失败: {type(e).__name__}") from e
 
 
-def _normalized_cycle_params(cycle: str, bar: str | None = None) -> dict:
+@router.post("/contract-grid")
+async def backtest_contract_grid(data: ContractGridBacktestRequest):
+    """运行单币种合约网格回测。"""
+    symbol = _normalize_symbol(data.symbol)
+    params = dict(data.params or {})
+    params["cycle"] = data.cycle
+    if data.bar:
+        params["bar"] = data.bar
+    params["leverage"] = data.leverage
+    params["fee_rate"] = data.fee_rate
+    params["slippage_pct"] = data.slippage_pct
+    params = normalize_contract_grid_params(params)
+    start_ms, end_ms = _resolve_range(data.start, data.end, params["bar"])
+
+    db = await get_db()
+    coverage = await _build_coverage_response(db, symbol, params, start_ms, end_ms)
+    if coverage["missing_reason"]:
+        raise HTTPException(status_code=400, detail=coverage["missing_reason"])
+
+    candles = await _load_cached_df(db, symbol, params["bar"], start_ms, end_ms)
+    if candles.empty:
+        raise HTTPException(status_code=400, detail="本地 K 线为空，请先下载所选时间范围的 K 线")
+
+    try:
+        result = run_contract_grid_backtest(
+            candles,
+            symbol=symbol,
+            params=params,
+            leverage=data.leverage,
+            fee_rate=data.fee_rate,
+            slippage_pct=data.slippage_pct,
+        )
+        if result.get("message"):
+            raise HTTPException(status_code=400, detail=result["message"])
+        result["candle_range"] = {
+            "start": _ms_to_text(start_ms),
+            "end": _ms_to_text(end_ms),
+            "bar": params["bar"],
+            "candle_count": len(candles),
+        }
+        record_id = await _save_grid_backtest_record(
+            db,
+            strategy_id=data.strategy_id,
+            symbol=symbol,
+            params=params,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            candle_count=len(candles),
+            result=result,
+        )
+        result["record_id"] = record_id
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"合约网格回测失败 {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"回测失败: {type(e).__name__}") from e
+
+
+def _normalized_cycle_params(
+    cycle: str,
+    bar: str | None = None,
+    strategy_type: str = "martingale_contract",
+) -> dict:
     params: dict[str, Any] = {"cycle": cycle}
     if bar:
         params["bar"] = bar
+    if strategy_type == "contract_grid":
+        return normalize_contract_grid_params(params)
     return normalize_martingale_params(params)
 
 
@@ -442,6 +577,42 @@ async def _save_backtest_record(
     return int(cursor.lastrowid)
 
 
+async def _save_grid_backtest_record(
+    db,
+    *,
+    strategy_id: str,
+    symbol: str,
+    params: dict,
+    start_ms: int,
+    end_ms: int,
+    candle_count: int,
+    result: dict[str, Any],
+) -> int:
+    cursor = await db.execute(
+        """
+        INSERT INTO contract_grid_backtest_records (
+            strategy_id, symbol, cycle, bar, start_ts, end_ts, candle_count,
+            params_json, summary_json, result_json
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            strategy_id,
+            symbol,
+            params["cycle"],
+            params["bar"],
+            start_ms,
+            end_ms,
+            candle_count,
+            json.dumps(params, ensure_ascii=False, default=str),
+            json.dumps(result.get("summary") or {}, ensure_ascii=False, default=str),
+            json.dumps(result, ensure_ascii=False, default=str),
+        ),
+    )
+    await db.commit()
+    return int(cursor.lastrowid)
+
+
 def _rows_to_df(rows: list[Any]) -> pd.DataFrame:
     if isinstance(rows, pd.DataFrame):
         return rows
@@ -568,6 +739,36 @@ def _record_summary(row) -> dict[str, Any]:
 
 def _record_detail(row) -> dict[str, Any]:
     item = _record_summary(row)
+    item["params"] = json.loads(row["params_json"] or "{}")
+    item["summary"] = json.loads(row["summary_json"] or "{}")
+    item["result"] = json.loads(row["result_json"] or "{}")
+    return item
+
+
+def _grid_record_summary(row) -> dict[str, Any]:
+    summary = json.loads(row["summary_json"] or "{}")
+    return {
+        "id": row["id"],
+        "strategy_id": row["strategy_id"],
+        "symbol": row["symbol"],
+        "cycle": row["cycle"],
+        "bar": row["bar"],
+        "start": _ms_to_text(row["start_ts"]),
+        "end": _ms_to_text(row["end_ts"]),
+        "candle_count": row["candle_count"],
+        "created_at": row["created_at"],
+        "total_pnl": summary.get("total_pnl", 0),
+        "return_pct": summary.get("return_pct", 0),
+        "max_drawdown": summary.get("max_drawdown", 0),
+        "total_trades": summary.get("total_trades", 0),
+        "win_rate": summary.get("win_rate", 0),
+        "max_open_legs": summary.get("max_open_legs", 0),
+        "stopped_reason": summary.get("stopped_reason"),
+    }
+
+
+def _grid_record_detail(row) -> dict[str, Any]:
+    item = _grid_record_summary(row)
     item["params"] = json.loads(row["params_json"] or "{}")
     item["summary"] = json.loads(row["summary_json"] or "{}")
     item["result"] = json.loads(row["result_json"] or "{}")

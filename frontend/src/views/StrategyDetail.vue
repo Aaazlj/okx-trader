@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useTradingStore } from '../stores/trading'
 import MartingaleBacktest from '../components/MartingaleBacktest.vue'
+import ContractGridBacktest from '../components/ContractGridBacktest.vue'
 import {
   getStrategy,
   getStrategyPositions,
@@ -29,6 +30,7 @@ const showPrompt = ref(false)
 // 策略对应的实时日志
 const liveLogs = computed(() => store.strategyLogs[strategyId.value] || [])
 const isMartingale = computed(() => strategy.value?.strategy_type === 'martingale_contract')
+const isContractGrid = computed(() => strategy.value?.strategy_type === 'contract_grid')
 
 async function loadAll(initial = false) {
   if (initial) loading.value = true
@@ -51,6 +53,10 @@ async function loadAll(initial = false) {
 
 async function toggleActive() {
   if (!strategy.value) return
+  if (isContractGrid.value) {
+    ElMessage.warning('合约网格 v1 仅支持参数配置和回测，暂不支持实盘启动')
+    return
+  }
   toggling.value = true
   try {
     if (strategy.value.is_active) {
@@ -119,6 +125,17 @@ function unitLabel(type: string) {
   return type === 'usdt' ? 'U' : '%'
 }
 
+function gridModeLabel(mode: string) {
+  if (mode === 'long') return '多网格'
+  if (mode === 'short') return '空网格'
+  return '中性网格'
+}
+
+function formatNumber(value: any, digits = 3) {
+  const num = Number(value)
+  return Number.isFinite(num) ? num.toFixed(digits) : '-'
+}
+
 const martingaleParamItems = computed(() => {
   const p = strategy.value?.params || {}
   return [
@@ -174,6 +191,52 @@ const martingaleParamItems = computed(() => {
   ]
 })
 
+const contractGridParamItems = computed(() => {
+  const p = strategy.value?.params || {}
+  return [
+    {
+      label: '周期',
+      value: `${cycleLabel(p.cycle || 'medium')} (${p.bar || '1H'})`,
+      desc: '短期=15m，中期=1H，长期=4H',
+    },
+    {
+      label: '网格方向',
+      value: gridModeLabel(p.grid_mode || 'neutral'),
+      desc: '中性 / 多网格 / 空网格均可回测',
+    },
+    {
+      label: '价格区间',
+      value: `${p.lower_price || '-'} - ${p.upper_price || '-'}`,
+      desc: '价格触达区间内网格线时模拟开平仓',
+    },
+    {
+      label: '网格数量',
+      value: `${p.grid_count || 0} 格`,
+      desc: `每格约 ${formatNumber(p.grid_spacing_pct || 0)}%`,
+    },
+    {
+      label: '保证金预算',
+      value: `${p.total_margin_usdt || '-'} USDT`,
+      desc: '按网格数量等额分配，受总预算约束',
+    },
+    {
+      label: '杠杆',
+      value: `${strategy.value?.leverage || p.leverage || 1}x`,
+      desc: '仅用于回测盈亏估算',
+    },
+    {
+      label: '区间失效',
+      value: `${p.stop_lower_price || '-'} / ${p.stop_upper_price || '-'}`,
+      desc: '跌破下沿或突破上沿后停止回测并结算',
+    },
+    {
+      label: '成本',
+      value: `${p.fee_rate ?? 0.0005} fee / ${p.slippage_pct ?? 0.02}% slip`,
+      desc: '手续费率和滑点参数',
+    },
+  ]
+})
+
 onMounted(() => loadAll(true))
 watch(strategyId, () => loadAll(true))
 
@@ -212,7 +275,7 @@ onUnmounted(() => clearInterval(timer))
             :loading="toggling"
             @click="toggleActive"
           >
-            {{ strategy.is_active ? '暂停策略' : '启动策略' }}
+            {{ isContractGrid ? '仅支持回测' : strategy.is_active ? '暂停策略' : '启动策略' }}
           </el-button>
         </div>
       </div>
@@ -260,6 +323,15 @@ onUnmounted(() => clearInterval(timer))
             <div class="param-desc">{{ item.desc }}</div>
           </div>
         </div>
+        <div v-else-if="isContractGrid" class="martingale-param-grid">
+          <div v-for="item in contractGridParamItems" :key="item.label" class="martingale-param-item">
+            <div class="martingale-param-top">
+              <span class="param-key">{{ item.label }}</span>
+              <span class="param-val">{{ item.value }}</span>
+            </div>
+            <div class="param-desc">{{ item.desc }}</div>
+          </div>
+        </div>
         <div v-else class="params-grid">
           <div v-for="(val, key) in strategy.params" :key="key" class="param-item">
             <span class="param-key">{{ key }}</span>
@@ -271,6 +343,10 @@ onUnmounted(() => clearInterval(timer))
 
     <MartingaleBacktest
       v-if="strategy.strategy_type === 'martingale_contract'"
+      :strategy="strategy"
+    />
+    <ContractGridBacktest
+      v-if="strategy.strategy_type === 'contract_grid'"
       :strategy="strategy"
     />
 

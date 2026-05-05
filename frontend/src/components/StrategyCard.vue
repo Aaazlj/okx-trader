@@ -2,7 +2,14 @@
 import { ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { startStrategy, stopStrategy, updateStrategy, getSymbols, generateMartingaleParams } from '../api'
+import {
+  startStrategy,
+  stopStrategy,
+  updateStrategy,
+  getSymbols,
+  generateMartingaleParams,
+  generateContractGridParams,
+} from '../api'
 import { useTradingStore, type Strategy } from '../stores/trading'
 
 const props = defineProps<{ strategy: Strategy }>()
@@ -11,11 +18,13 @@ const router = useRouter()
 
 const stats = computed(() => store.strategyStats[props.strategy.id])
 const isMartingale = computed(() => props.strategy.strategy_type === 'martingale_contract')
+const isContractGrid = computed(() => props.strategy.strategy_type === 'contract_grid')
 
 const toggling = ref(false)
 const showConfig = ref(false)
 const generatingParams = ref(false)
 const martingaleRiskProfile = ref('balanced')
+const gridRiskProfile = ref('balanced')
 
 function defaultMartingaleParams() {
   return {
@@ -41,10 +50,39 @@ function defaultMartingaleParams() {
   }
 }
 
+function defaultContractGridParams() {
+  return {
+    cycle: 'medium',
+    bar: '1H',
+    grid_mode: 'neutral',
+    lower_price: 0,
+    upper_price: 0,
+    grid_count: 20,
+    total_margin_usdt: 300,
+    leverage: 3,
+    mgn_mode: 'cross',
+    stop_lower_price: 0,
+    stop_upper_price: 0,
+    fee_rate: 0.0005,
+    slippage_pct: 0.02,
+    risk: {
+      max_concurrent: 1,
+      max_daily_per_symbol: 1,
+      max_daily_loss_pct: 3,
+    },
+  }
+}
+
 function cycleLabel(cycle: string) {
   if (cycle === 'short') return '短期'
   if (cycle === 'long') return '长期'
   return '中期'
+}
+
+function gridModeLabel(mode: string) {
+  if (mode === 'long') return '多网格'
+  if (mode === 'short') return '空网格'
+  return '中性网格'
 }
 
 function valueTypeLabel(type: string) {
@@ -98,6 +136,26 @@ function syncMartingaleBudget() {
   editForm.value.order_amount_usdt = Number(editForm.value.params.initial_margin_usdt || 0)
 }
 
+function syncContractGridBudget() {
+  if (!isContractGrid.value) return
+  editForm.value.params.total_margin_usdt = Number(editForm.value.params.total_margin_usdt || 0)
+  editForm.value.params.leverage = Number(editForm.value.leverage || 1)
+  editForm.value.params.mgn_mode = editForm.value.params.mgn_mode || 'cross'
+  editForm.value.order_amount_usdt = editForm.value.params.total_margin_usdt
+}
+
+const gridSpacingText = computed(() => {
+  const p = editForm.value.params || {}
+  const lower = Number(p.lower_price || 0)
+  const upper = Number(p.upper_price || 0)
+  const count = Number(p.grid_count || 0)
+  if (lower <= 0 || upper <= lower || count <= 0) return '请先设置有效区间'
+  const spacing = (upper - lower) / count
+  const mid = (upper + lower) / 2
+  const pct = mid > 0 ? spacing / mid * 100 : 0
+  return `每格约 ${spacing.toFixed(6)} USDT / ${pct.toFixed(3)}%`
+})
+
 function goToDetail() {
   router.push(`/strategy/${props.strategy.id}`)
 }
@@ -114,6 +172,10 @@ const editForm = ref({
 })
 
 async function toggleActive() {
+  if (isContractGrid.value) {
+    ElMessage.warning('合约网格 v1 仅支持参数配置和回测，暂不支持实盘启动')
+    return
+  }
   toggling.value = true
   try {
     if (props.strategy.is_active) {
@@ -133,13 +195,15 @@ async function toggleActive() {
 function openConfig() {
   editForm.value = {
     symbols: [...props.strategy.symbols],
-    decision_mode: isMartingale.value ? 'technical' : props.strategy.decision_mode,
+    decision_mode: (isMartingale.value || isContractGrid.value) ? 'technical' : props.strategy.decision_mode,
     leverage: props.strategy.leverage,
     order_amount_usdt: props.strategy.order_amount_usdt,
     ai_min_confidence: props.strategy.ai_min_confidence,
     ai_prompt: props.strategy.ai_prompt,
     params: isMartingale.value
       ? { ...defaultMartingaleParams(), ...props.strategy.params, risk: { ...defaultMartingaleParams().risk, ...(props.strategy.params?.risk || {}) } }
+      : isContractGrid.value
+        ? { ...defaultContractGridParams(), ...props.strategy.params, risk: { ...defaultContractGridParams().risk, ...(props.strategy.params?.risk || {}) } }
       : { ...props.strategy.params },
   }
   showConfig.value = true
@@ -154,13 +218,27 @@ async function saveConfig() {
         return
       }
     }
+    if (isContractGrid.value) {
+      syncContractGridBudget()
+      if (editForm.value.leverage > selectedMaxLeverage.value) {
+        ElMessage.error(`当前交易对最大支持 ${selectedMaxLeverage.value}x 杠杆`)
+        return
+      }
+      if (Number(editForm.value.params.upper_price || 0) <= Number(editForm.value.params.lower_price || 0)) {
+        ElMessage.error('网格上沿必须高于下沿')
+        return
+      }
+    }
     const payload = {
       ...editForm.value,
-      decision_mode: isMartingale.value ? 'technical' : editForm.value.decision_mode,
+      decision_mode: (isMartingale.value || isContractGrid.value) ? 'technical' : editForm.value.decision_mode,
       params: editForm.value.params,
     }
     if (isMartingale.value) {
       payload.order_amount_usdt = Number(editForm.value.params.initial_margin_usdt || editForm.value.order_amount_usdt)
+    }
+    if (isContractGrid.value) {
+      payload.order_amount_usdt = Number(editForm.value.params.total_margin_usdt || editForm.value.order_amount_usdt)
     }
     await updateStrategy(props.strategy.id, payload)
     ElMessage.success('配置已保存')
@@ -190,6 +268,32 @@ async function generateParamsByAI() {
     ElMessage.success('AI 参数已生成，请确认后保存')
   } catch (e: any) {
     ElMessage.error(e.response?.data?.detail || 'AI 参数生成失败')
+  } finally {
+    generatingParams.value = false
+  }
+}
+
+async function generateGridParamsByAI() {
+  const symbol = editForm.value.symbols[0] || props.strategy.symbols[0]
+  if (!symbol) {
+    ElMessage.warning('请先选择交易对')
+    return
+  }
+  generatingParams.value = true
+  try {
+    const { data } = await generateContractGridParams({
+      symbol,
+      cycle: editForm.value.params.cycle || 'medium',
+      grid_mode: editForm.value.params.grid_mode || 'neutral',
+      risk_profile: gridRiskProfile.value,
+      total_margin_usdt: editForm.value.params.total_margin_usdt || 300,
+    })
+    editForm.value.params = data.params
+    editForm.value.leverage = data.params.leverage || editForm.value.leverage
+    syncContractGridBudget()
+    ElMessage.success('AI 网格参数已生成，请确认后保存')
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.detail || 'AI 网格参数生成失败')
   } finally {
     generatingParams.value = false
   }
@@ -230,7 +334,7 @@ async function loadSymbols() {
           :loading="toggling"
           @click.stop="toggleActive"
         >
-          {{ strategy.is_active ? '暂停' : '启动' }}
+          {{ isContractGrid ? '仅回测' : strategy.is_active ? '暂停' : '启动' }}
         </el-button>
         <el-button size="small" @click.stop="openConfig">
           <el-icon><Setting /></el-icon>
@@ -279,6 +383,14 @@ async function loadSymbols() {
         止盈 {{ strategy.params?.take_profit_value || strategy.params?.take_profit_pct || 0 }}{{ valueTypeLabel(strategy.params?.take_profit_type || 'pct') }}
       </span>
     </div>
+    <div v-if="isContractGrid" class="config-row">
+      <span class="config-label">网格</span>
+      <span style="font-size: 12px; color: var(--text-secondary)">
+        {{ cycleLabel(strategy.params?.cycle || 'medium') }} ·
+        {{ gridModeLabel(strategy.params?.grid_mode || 'neutral') }} ·
+        {{ strategy.params?.grid_count || 0 }} 格
+      </span>
+    </div>
 
     <!-- 策略统计 -->
     <div v-if="stats" class="stats-row">
@@ -302,7 +414,7 @@ async function loadSymbols() {
   <el-dialog
     v-model="showConfig"
     :title="`配置 — ${strategy.name}`"
-    :width="isMartingale ? '760px' : '520px'"
+    :width="(isMartingale || isContractGrid) ? '760px' : '520px'"
     @open="loadSymbols"
   >
     <el-form label-width="100px" size="default">
@@ -318,7 +430,7 @@ async function loadSymbols() {
       </el-form-item>
 
       <el-form-item label="决策模式">
-        <el-radio-group v-model="editForm.decision_mode" :disabled="isMartingale">
+        <el-radio-group v-model="editForm.decision_mode" :disabled="isMartingale || isContractGrid">
           <el-radio value="technical">📐 纯技术指标</el-radio>
           <el-radio value="hybrid">🔀 混合模式 (指标+AI)</el-radio>
           <el-radio value="ai">🤖 AI 驱动</el-radio>
@@ -331,9 +443,12 @@ async function loadSymbols() {
         <span v-if="isMartingale" class="field-help">
           当前交易对最大 {{ selectedMaxLeverage }}x；{{ liquidationDistanceText }}
         </span>
+        <span v-if="isContractGrid" class="field-help">
+          当前交易对最大 {{ selectedMaxLeverage }}x；该杠杆仅用于网格回测参数
+        </span>
       </el-form-item>
 
-      <el-form-item v-if="!isMartingale" label="每单金额">
+      <el-form-item v-if="!isMartingale && !isContractGrid" label="每单金额">
         <el-input-number v-model="editForm.order_amount_usdt" :min="5" :step="10" />
         <span style="margin-left: 8px; color: var(--text-secondary)">USDT</span>
       </el-form-item>
@@ -432,6 +547,85 @@ async function loadSymbols() {
         </div>
       </template>
 
+      <template v-if="isContractGrid">
+        <el-divider content-position="left">合约网格参数</el-divider>
+
+        <el-form-item label="AI 生成">
+          <div class="ai-param-row">
+            <el-select v-model="gridRiskProfile" style="width: 130px">
+              <el-option label="稳健" value="conservative" />
+              <el-option label="均衡" value="balanced" />
+              <el-option label="进取" value="aggressive" />
+            </el-select>
+            <el-button :loading="generatingParams" @click="generateGridParamsByAI">
+              生成参数
+            </el-button>
+          </div>
+        </el-form-item>
+
+        <div class="contract-grid-grid">
+          <el-form-item label="周期">
+            <div class="param-control">
+              <el-select v-model="editForm.params.cycle">
+                <el-option label="短期" value="short" />
+                <el-option label="中期" value="medium" />
+                <el-option label="长期" value="long" />
+              </el-select>
+              <span class="field-help">短期=15m，中期=1H，长期=4H</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="网格方向">
+            <div class="param-control">
+              <el-select v-model="editForm.params.grid_mode">
+                <el-option label="中性网格" value="neutral" />
+                <el-option label="多网格" value="long" />
+                <el-option label="空网格" value="short" />
+              </el-select>
+              <span class="field-help">v1 仅用于回测，不会启动实盘挂单</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="价格下沿">
+            <div class="param-control">
+              <el-input-number v-model="editForm.params.lower_price" :min="0" :step="1" />
+              <span class="field-help">网格运行区间下沿</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="价格上沿">
+            <div class="param-control">
+              <el-input-number v-model="editForm.params.upper_price" :min="0" :step="1" />
+              <span class="field-help">必须高于价格下沿</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="网格数量">
+            <div class="param-control">
+              <el-input-number v-model="editForm.params.grid_count" :min="2" :max="200" />
+              <span class="field-help">{{ gridSpacingText }}</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="保证金预算">
+            <div class="param-control">
+              <div>
+                <el-input-number v-model="editForm.params.total_margin_usdt" :min="5" :step="10" />
+                <span class="unit">USDT</span>
+              </div>
+              <span class="field-help">回测按网格数量等额分配保证金</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="下沿止损">
+            <div class="param-control">
+              <el-input-number v-model="editForm.params.stop_lower_price" :min="0" :step="1" />
+              <span class="field-help">跌破后回测停止并强制结算未平仓网格</span>
+            </div>
+          </el-form-item>
+          <el-form-item label="上沿止损">
+            <div class="param-control">
+              <el-input-number v-model="editForm.params.stop_upper_price" :min="0" :step="1" />
+              <span class="field-help">突破后回测停止并强制结算未平仓网格</span>
+            </div>
+          </el-form-item>
+        </div>
+      </template>
+
       <template v-if="editForm.decision_mode === 'ai' || editForm.decision_mode === 'hybrid'">
         <el-divider content-position="left">AI 配置</el-divider>
 
@@ -476,7 +670,8 @@ async function loadSymbols() {
   gap: 8px;
   align-items: center;
 }
-.martingale-grid {
+.martingale-grid,
+.contract-grid-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   column-gap: 18px;
@@ -531,7 +726,8 @@ async function loadSymbols() {
   font-weight: 600;
 }
 @media (max-width: 760px) {
-  .martingale-grid {
+  .martingale-grid,
+  .contract-grid-grid {
     grid-template-columns: 1fr;
   }
 }

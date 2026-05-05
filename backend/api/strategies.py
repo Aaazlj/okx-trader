@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException
 
 from db.database import get_db
 from models import StrategyResponse, StrategyUpdate
+from strategies.contract_grid import normalize_contract_grid_params
 
 router = APIRouter(prefix="/api/strategies", tags=["strategies"])
 
@@ -140,7 +141,10 @@ async def update_strategy(strategy_id: str, update: StrategyUpdate):
     if update.poll_interval is not None:
         updates["poll_interval"] = update.poll_interval
     if update.params is not None:
-        updates["params"] = json.dumps(update.params)
+        params = update.params
+        if current_row["strategy_type"] == "contract_grid":
+            params = normalize_contract_grid_params(params)
+        updates["params"] = json.dumps(params, ensure_ascii=False)
     if update.ai_min_confidence is not None:
         updates["ai_min_confidence"] = update.ai_min_confidence
     if update.ai_prompt is not None:
@@ -181,6 +185,13 @@ def _max_leverage_for_symbols(symbols: list[str] | None) -> int:
 async def start_strategy(strategy_id: str):
     """启动策略"""
     db = await get_db()
+    cursor = await db.execute("SELECT strategy_type FROM strategies WHERE id = ?", (strategy_id,))
+    row = await cursor.fetchone()
+    if row is None:
+        raise HTTPException(status_code=404, detail="策略不存在")
+    if row["strategy_type"] == "contract_grid":
+        raise HTTPException(status_code=400, detail="合约网格 v1 仅支持参数配置和回测，暂不支持实盘启动")
+
     await db.execute(
         "UPDATE strategies SET is_active = 1, updated_at = datetime('now') WHERE id = ?",
         (strategy_id,),
