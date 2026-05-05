@@ -3,6 +3,8 @@ import { createPinia } from 'pinia'
 import {
   ElAlert,
   ElButton,
+  ElConfigProvider,
+  ElDatePicker,
   ElDialog,
   ElDivider,
   ElForm,
@@ -13,6 +15,7 @@ import {
   ElOption,
   ElProgress,
   ElRadio,
+  ElRadioButton,
   ElRadioGroup,
   ElSelect,
   ElSlider,
@@ -42,6 +45,8 @@ const pinia = createPinia()
 const elementPlusComponents = [
   ElAlert,
   ElButton,
+  ElConfigProvider,
+  ElDatePicker,
   ElDialog,
   ElDivider,
   ElForm,
@@ -52,6 +57,7 @@ const elementPlusComponents = [
   ElOption,
   ElProgress,
   ElRadio,
+  ElRadioButton,
   ElRadioGroup,
   ElSelect,
   ElSlider,

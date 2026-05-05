@@ -38,7 +38,7 @@
 
 ## 项目简介
 
-**OKX Trader** 是一套面向 OKX 永续合约的**自动量化交易系统**。它内置 **11 个已注册的 strategy_type**，支持**纯技术指标 / AI 驱动 / 混合决策**三种模式，配备 Web 管理面板、实时 WebSocket 推送、SQLite 持久化、基础风控能力和永续合约智能分析报告。
+**OKX Trader** 是一套面向 OKX 永续合约的**自动量化交易系统**。它内置 **12 个已注册的 strategy_type**，支持**纯技术指标 / AI 驱动 / 混合决策**三种模式，配备 Web 管理面板、实时 WebSocket 推送、SQLite 持久化、基础风控能力、马丁格尔合约回测和永续合约智能分析报告。
 
 核心链路：行情数据 → 技术指标 / AI 分析 → 策略信号 → 风控检查 → 订单执行 → 持仓监控 → 前端实时展示。
 
@@ -155,6 +155,12 @@
     <td>冲顶放量后剥头皮 — 量能高潮 + 价格衰竭</td>
   </tr>
   <tr>
+    <td><b>马丁格尔合约</b></td>
+    <td>🟡 双向</td>
+    <td>技术</td>
+    <td>短/中/长期周期选择，按下跌/上涨触发加仓，支持 U 或百分比止盈</td>
+  </tr>
+  <tr>
     <td><b>AI 激进短线 5m</b></td>
     <td>🟡 双向</td>
     <td>混合</td>
@@ -180,7 +186,7 @@
   </tr>
 </table>
 
-> 当前注册策略共 **11 个 strategy_type**。三种决策模式：`technical` 纯技术指标 · `ai` 纯 AI 驱动 · `hybrid` 技术预筛 + AI 确认。
+> 当前注册策略共 **12 个 strategy_type**。三种决策模式：`technical` 纯技术指标 · `ai` 纯 AI 驱动 · `hybrid` 技术预筛 + AI 确认。
 
 ---
 
@@ -254,6 +260,7 @@ pnpm dev                   # → http://localhost:5173
 订单级            ──  OCO 自动保护 ── Market Order 即刻成交
 管理退出          ──  TP1 减仓50% ── TP2 全平 ── 保本止损
                    ──  极限止盈(2%/30s) ── 时间止损
+马丁格尔          ──  投资额 ── 首单保证金 ── 加仓保证金 ── 自动加仓次数
 ```
 
 ---
@@ -263,8 +270,8 @@ pnpm dev                   # → http://localhost:5173
 | 页面 | 功能 |
 |:---|:---|
 | **Dashboard** | 账户总览 · 策略网格 · 实时 PnL · 一键启停 · 模式切换 |
-| **Strategy Detail** | PnL 曲线 (ECharts) · 信号历史 · 持仓追踪 · 胜率统计 |
-| **Perpetual Analysis** | 交易对选择 · OKX 实时数据拉取 · 综合评分 · 规则触发明细 · 多周期/支撑压力/资金费率/OI/成交量/情绪/订单簿/机构行为/市场阶段/策略匹配/风险收益比/多角色/冲突/交易计划分析 · AI 完整报告 |
+| **Strategy Detail** | PnL 曲线 (ECharts) · 信号历史 · 持仓追踪 · 胜率统计 · 马丁格尔 K 线下载/缓存/回测记录 |
+| **Perpetual Analysis** | 交易对选择 · OKX 实时数据拉取 · 综合评分 · 规则触发明细 · 多周期/支撑压力/资金费率/OI/成交量/情绪/订单簿/机构行为/市场阶段/策略匹配/网格与马丁格尔参数建议/风险收益比/多角色/冲突/交易计划分析 · AI 完整报告 |
 | **Analysis History** | 自动保存完整分析快照 · 交易对/时间筛选 · 历史报告详情 · 当前实时价对比 · 同币种评分变化 · K 线复盘关键价位 · 备注 |
 | **Settings** | OKX API 配置 · AI API 配置 · Telegram 通知 · 连通性测试 |
 | **Log Viewer** | 实时日志推流 · 分类过滤 (信号 / 交易 / 错误) |
@@ -290,6 +297,21 @@ pnpm dev                   # → http://localhost:5173
 | `GET` | `/api/perpetual-analysis/history/score-series` | 同一交易对多次分析评分变化 |
 | `GET` | `/api/perpetual-analysis/history/{id}/replay` | 拉取分析时间点后的 K 线，检查关键价位是否触达 |
 
+马丁格尔相关接口：
+
+| 方法 | 路径 | 用途 |
+|:---|:---|:---|
+| `POST` | `/api/martingale/params/generate` | 使用 AI 生成一份静态马丁格尔参数，保存后策略与回测共用 |
+| `POST` | `/api/backtests/candles/download` | 按交易对、周期和时间范围下载回测 K 线并保存到本地缓存 |
+| `GET` | `/api/backtests/candles/coverage` | 查询本地回测 K 线缓存数量、覆盖范围和是否足够回测 |
+| `POST` | `/api/backtests/martingale` | 使用本地缓存 K 线运行单币回测，成功后保存回测记录 |
+| `GET` | `/api/backtests/martingale/records` | 查询马丁格尔回测记录列表 |
+| `GET` | `/api/backtests/martingale/records/{id}` | 查询单条回测记录详情 |
+
+马丁格尔合约策略默认不开启。配置项按 OKX DCA 风格收敛为：周期（短期=1H、中期=4H、长期=1D）、方向、触发加仓条件、单周期止盈目标、初次下单保证金、加仓单保证金和最大自动加仓次数。触发加仓条件支持“百分比 %”或“USDT U”：做多时价格从持仓均价下跌达到该距离加仓，做空时价格上涨达到该距离加仓；百分比是相对均价比例，U 是 USDT 价格差。周期止盈也支持“百分比 %”或“USDT U”：百分比是相对均价收益比例，U 是本轮持仓浮盈金额。投资额不再手填，自动按 `初次下单保证金 + 加仓单保证金 × 最大自动加仓次数` 计算，表示策略最多可占用的总保证金预算，不是账户总资产。杠杆保存时会按所选交易对的 OKX `lever` 上限校验；持仓页优先展示 OKX 返回的强平价，回测交易明细展示按成交均价和杠杆估算的强平价。首单技术触发由后端内部按所选周期处理，不在界面暴露 BOLL/RSI 等细节；开仓后跳过 OCO，由专用状态机记录均价、补仓明细并按目标统一平仓。
+
+马丁格尔回测使用本地 K 线缓存。策略详情页先选择交易对、周期和回测时间范围（也可用近 1/3/7/30/90 天快捷按钮），点击“下载K线”保存数据；后续同一交易对/周期/时间范围会复用缓存。按钮区固定包含“查询缓存 / 下载K线 / 运行回测”，调整时间范围本身不会自动请求接口。运行回测会从所选时间范围第一根 K 线按配置方向开首单，按加仓和止盈参数循环模拟，成功后写入 `martingale_backtest_records`，保存参数快照、K 线范围、收益摘要、权益曲线和交易明细。回测成本参数由后端默认使用 `fee_rate=0.0005`、`slippage_pct=0.02`，前端不再手动输入。
+
 ---
 
 ## 🗂️ 项目结构
@@ -305,6 +327,8 @@ okx-trader/
 │   │   ├── strategies.py    #   策略管理
 │   │   ├── market.py        #   行情数据
 │   │   ├── perpetual_analysis.py # 永续合约智能分析
+│   │   ├── martingale.py     #   马丁格尔 AI 参数生成
+│   │   ├── backtests.py      #   策略回测
 │   │   └── settings.py      #   系统配置
 │   ├── analysis/
 │   │   ├── perpetual.py     # 永续合约结构化评分与规则引擎
@@ -313,7 +337,9 @@ okx-trader/
 │   │   ├── strategy_runner.py   # 策略编排器 (异步轮询)
 │   │   ├── trade_executor.py    # 订单执行 + OCO 挂载
 │   │   ├── risk_manager.py      # 风控决策 (日重置)
-│   │   └── position_monitor.py  # 管理退出状态机
+│   │   ├── position_monitor.py  # 管理退出状态机
+│   │   ├── martingale_manager.py # 马丁格尔补仓/退出状态机
+│   │   └── martingale_backtester.py # 马丁格尔回测引擎
 │   ├── strategies/          # 策略实现层
 │   │   ├── base.py          #   IStrategy 抽象接口
 │   │   ├── registry.py      #   策略注册表
@@ -323,6 +349,7 @@ okx-trader/
 │   │   ├── boll_trend_pullback.py    # 趋势回踩
 │   │   ├── boll_midline_reclaim.py   # 中线收复
 │   │   ├── climax_exhaustion_scalp.py # 高潮衰竭
+│   │   ├── martingale_contract.py # 马丁格尔合约
 │   │   └── ai_strategy.py   #   AI 策略 (4 个实例)
 │   ├── exchange/
 │   │   └── okx_client.py    # OKX SDK 封装

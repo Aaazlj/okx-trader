@@ -318,6 +318,7 @@ async def get_positions():
                 "current_price": current,
                 "unrealized_pnl": float(p.get("upl", 0) or 0),
                 "leverage": int(p.get("lever", 0) or 0),
+                "liquidation_price": float(p.get("liqPx", 0) or 0) or None,
                 "margin_mode": p.get("mgnMode", ""),
                 "tp_price": tp or None,
                 "sl_price": sl or None,

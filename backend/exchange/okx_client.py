@@ -70,6 +70,16 @@ class OKXClient:
         logger.info(f"合约面值: {inst_id} = {ct_val}")
         return ct_val
 
+    def get_max_leverage(self, inst_id: str) -> int:
+        """获取交易对支持的最大杠杆。"""
+        result = self.public.get_instruments(instType="SWAP", instId=inst_id)
+        if result["code"] != "0" or not result["data"]:
+            raise ValueError(f"品种不存在: {inst_id}")
+        try:
+            return max(1, int(float(result["data"][0].get("lever", 100) or 100)))
+        except (TypeError, ValueError):
+            return 100
+
     def get_available_symbols(self) -> list[dict]:
         """获取所有可用的永续合约交易对"""
         result = self.public.get_instruments(instType="SWAP")
@@ -80,10 +90,15 @@ class OKXClient:
         symbols = []
         for item in result["data"]:
             if item.get("instId", "").endswith("-USDT-SWAP"):
+                try:
+                    max_leverage = int(float(item.get("lever", 100) or 100))
+                except (TypeError, ValueError):
+                    max_leverage = 100
                 symbols.append({
                     "inst_id": item["instId"],
                     "base": item.get("ctValCcy", ""),
                     "ct_val": float(item.get("ctVal", 0)),
+                    "max_leverage": max_leverage,
                     "min_sz": item.get("minSz", "1"),
                     "state": item.get("state", ""),
                 })

@@ -204,6 +204,50 @@ class AIAnalyzer:
             logger.error(f"AI 报告生成异常: {e}")
             return None
 
+    async def generate_martingale_params(self, request: dict) -> dict | None:
+        """生成马丁格尔策略参数 JSON。"""
+        if not self.api_key:
+            logger.warning("AI API Key 未配置，无法生成马丁格尔参数")
+            return None
+
+        prompt = self._build_martingale_params_prompt(request)
+        try:
+            async with httpx.AsyncClient(timeout=45) as client:
+                response = await client.post(
+                    f"{self.api_url}/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {self.api_key}",
+                    },
+                    json={
+                        "model": self.model,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": "你是风控优先的加密货币永续合约量化参数助手，只输出 JSON。",
+                            },
+                            {"role": "user", "content": prompt},
+                        ],
+                        "temperature": 0.2,
+                        "max_tokens": 800,
+                        "response_format": {"type": "json_object"},
+                    },
+                )
+
+            if response.status_code != 200:
+                logger.error(f"AI 参数请求失败: HTTP {response.status_code} {response.text[:200]}")
+                return None
+
+            result = response.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "{}")
+            return json.loads(self._extract_json(content))
+        except json.JSONDecodeError:
+            logger.error("AI 马丁格尔参数 JSON 解析失败")
+            return None
+        except Exception as e:
+            logger.error(f"AI 马丁格尔参数生成异常: {e}")
+            return None
+
     def _build_hybrid_prompt(
         self, symbol: str, indicators: dict, strategy_name: str,
         technical_signal: dict, custom_prompt: str
@@ -277,6 +321,7 @@ class AIAnalyzer:
             "roleAdvice": analysis.get("role_advice"),
             "conflictAnalysis": analysis.get("conflict_analysis"),
             "tradingPlan": analysis.get("trading_plan"),
+            "strategyParameterAdvice": analysis.get("strategy_parameter_advice"),
             "quantRuleBreakdown": analysis.get("quant_rules"),
             "scorePanel": analysis.get("scores"),
             "dataQualityNotes": analysis.get("data_quality_notes"),
@@ -318,9 +363,10 @@ class AIAnalyzer:
 十三、风险收益比
 十四、多角色交易建议
 十五、信号冲突与注意事项
-十六、综合评分说明
-十七、交易计划草稿
-十八、最终操作建议
+十六、网格与马丁格尔参数建议
+十七、综合评分说明
+十八、交易计划草稿
+十九、最终操作建议
 
 【风险免责声明】
 本分析报告基于公开市场数据和量化模型推演，仅作为市场状态和风险参考，不构成任何形式的投资建议。加密货币市场波动剧烈，过往规律不代表未来表现，请根据自身风险承受能力谨慎决策，自行承担交易风险。
@@ -331,6 +377,31 @@ class AIAnalyzer:
 3. 若某项数据缺失或置信度低，在对应章节明确说明，不强行推断。
 4. 报告要有内在逻辑连贯性，各章节结论不可自相矛盾。
 5. 每个章节 2-5 句话，重点突出，不堆砌数据。
+""".strip()
+
+    def _build_martingale_params_prompt(self, request: dict) -> str:
+        return f"""
+请为 OKX USDT 永续合约 DCA/马丁格尔策略生成一组简洁、保守参数。
+
+输入：
+- symbol: {request.get("symbol")}
+- cycle: {request.get("cycle")}
+- risk_profile: {request.get("risk_profile")}
+- max_position_usdt: {request.get("max_position_usdt")}
+
+只输出 JSON 对象，字段必须包含：
+cycle, direction, add_trigger_type, add_trigger_value, take_profit_type, take_profit_value,
+max_position_usdt, initial_margin_usdt, add_margin_usdt, max_add_count, fee_rate, slippage_pct, risk。
+
+约束：
+- cycle 只能是 "short"、"medium" 或 "long"。
+- direction 只能是 "long"、"short" 或 "both"。
+- add_trigger_type 和 take_profit_type 只能是 "pct" 或 "usdt"。
+- 若使用 pct，add_trigger_value 建议 0.5-8，take_profit_value 建议 0.2-5。
+- initial_margin_usdt + add_margin_usdt * max_add_count 不应明显超过 max_position_usdt。
+- max_add_count 建议 3-8。
+- risk 必须包含 max_concurrent, max_daily_per_symbol, max_daily_loss_pct。
+- 不要输出说明文字。
 """.strip()
 
     @staticmethod

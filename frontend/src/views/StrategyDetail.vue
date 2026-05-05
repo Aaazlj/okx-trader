@@ -3,6 +3,7 @@ import { ref, computed, defineAsyncComponent, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useTradingStore } from '../stores/trading'
+import MartingaleBacktest from '../components/MartingaleBacktest.vue'
 import {
   getStrategy,
   getStrategyPositions,
@@ -27,6 +28,7 @@ const showPrompt = ref(false)
 
 // 策略对应的实时日志
 const liveLogs = computed(() => store.strategyLogs[strategyId.value] || [])
+const isMartingale = computed(() => strategy.value?.strategy_type === 'martingale_contract')
 
 async function loadAll(initial = false) {
   if (initial) loading.value = true
@@ -107,6 +109,71 @@ function pnlPercent(row: any) {
   return row.pnl_ratio ?? null
 }
 
+function cycleLabel(cycle: string) {
+  if (cycle === 'short') return '短期'
+  if (cycle === 'long') return '长期'
+  return '中期'
+}
+
+function unitLabel(type: string) {
+  return type === 'usdt' ? 'U' : '%'
+}
+
+const martingaleParamItems = computed(() => {
+  const p = strategy.value?.params || {}
+  return [
+    {
+      label: '周期',
+      value: `${cycleLabel(p.cycle || 'medium')} (${p.bar || '4H'})`,
+      desc: '短期=1H，中期=4H，长期=1D',
+    },
+    {
+      label: '方向',
+      value: p.direction === 'both' ? '双向' : p.direction === 'short' ? '只做空' : '只做多',
+      desc: '限制首单信号方向',
+    },
+    {
+      label: '跌/涨加仓',
+      value: `${p.add_trigger_value ?? p.price_step_pct ?? '-'} ${unitLabel(p.add_trigger_type || 'pct')}`,
+      desc: unitLabel(p.add_trigger_type) === 'U'
+        ? '做多下跌、做空上涨达到该 USDT 价格差后加仓'
+        : '做多下跌、做空上涨达到该百分比后加仓',
+    },
+    {
+      label: '周期止盈',
+      value: `${p.take_profit_value ?? p.take_profit_pct ?? '-'} ${unitLabel(p.take_profit_type || 'pct')}`,
+      desc: unitLabel(p.take_profit_type) === 'U'
+        ? '本轮持仓浮盈达到该 USDT 金额后平仓'
+        : '本轮持仓相对均价达到该收益比例后平仓',
+    },
+    {
+      label: '投资额',
+      value: `${p.max_position_usdt ?? '-'} USDT`,
+      desc: '自动计算：初次保证金 + 加仓保证金 × 最大自动加仓次数',
+    },
+    {
+      label: '初次保证金',
+      value: `${p.initial_margin_usdt ?? '-'} USDT`,
+      desc: '首单保证金',
+    },
+    {
+      label: '加仓保证金',
+      value: `${p.add_margin_usdt ?? '-'} USDT`,
+      desc: '每次自动加仓单保证金',
+    },
+    {
+      label: '最大自动加仓',
+      value: `${p.max_add_count ?? 0} 次`,
+      desc: '首单之后最多自动加仓次数',
+    },
+    {
+      label: '杠杆',
+      value: `${strategy.value?.leverage || 1}x`,
+      desc: '合约杠杆倍数',
+    },
+  ]
+})
+
 onMounted(() => loadAll(true))
 watch(strategyId, () => loadAll(true))
 
@@ -184,7 +251,16 @@ onUnmounted(() => clearInterval(timer))
             <pre v-show="showPrompt" class="prompt-text">{{ strategy.ai_prompt || '（未配置）' }}</pre>
           </div>
         </template>
-        <div class="params-grid">
+        <div v-if="isMartingale" class="martingale-param-grid">
+          <div v-for="item in martingaleParamItems" :key="item.label" class="martingale-param-item">
+            <div class="martingale-param-top">
+              <span class="param-key">{{ item.label }}</span>
+              <span class="param-val">{{ item.value }}</span>
+            </div>
+            <div class="param-desc">{{ item.desc }}</div>
+          </div>
+        </div>
+        <div v-else class="params-grid">
           <div v-for="(val, key) in strategy.params" :key="key" class="param-item">
             <span class="param-key">{{ key }}</span>
             <span class="param-val">{{ val }}</span>
@@ -192,6 +268,11 @@ onUnmounted(() => clearInterval(timer))
         </div>
       </div>
     </div>
+
+    <MartingaleBacktest
+      v-if="strategy.strategy_type === 'martingale_contract'"
+      :strategy="strategy"
+    />
 
     <!-- ④ 策略持仓 -->
     <div class="section">
@@ -233,6 +314,9 @@ onUnmounted(() => clearInterval(timer))
           </template>
         </el-table-column>
         <el-table-column prop="sl_price" label="止损" width="100" />
+        <el-table-column prop="liquidation_price" label="强平价" width="110">
+          <template #default="{ row }">{{ row.liquidation_price || '-' }}</template>
+        </el-table-column>
         <el-table-column label="SL距离" width="80">
           <template #default="{ row }">
             <span v-if="row.sl_distance_pct !== null" style="color: var(--accent-red)">
@@ -467,9 +551,31 @@ onUnmounted(() => clearInterval(timer))
 .params-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px;
 }
+.martingale-param-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+}
 .param-item {
   display: flex; justify-content: space-between; align-items: center;
   padding: 4px 10px; background: var(--bg-secondary); border-radius: 6px; font-size: 12px;
+}
+.martingale-param-item {
+  padding: 8px 10px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+}
+.martingale-param-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+}
+.param-desc {
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
 }
 .param-key { color: var(--text-muted); }
 .param-val { color: var(--text-primary); font-weight: 500; }

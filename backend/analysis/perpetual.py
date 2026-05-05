@@ -122,6 +122,13 @@ class PerpetualAnalysisEngine:
             volatility_warning,
             timeframe,
         )
+        strategy_parameter_advice = self._strategy_parameter_advice(
+            current_price,
+            trend,
+            support_resistance,
+            summary,
+            timeframe,
+        )
 
         return {
             "symbol": symbol,
@@ -153,6 +160,7 @@ class PerpetualAnalysisEngine:
             "role_advice": role_advice,
             "conflict_analysis": conflicts,
             "trading_plan": trading_plan,
+            "strategy_parameter_advice": strategy_parameter_advice,
             "timeframe_snapshot": timeframe,
             "ai_report": None,
             "ai_report_error": None,
@@ -1398,6 +1406,173 @@ class PerpetualAnalysisEngine:
             "disclaimer": "仅为计划草稿，不可直接代替用户下单，所有参数需用户自行确认。",
         }
 
+    @classmethod
+    def _strategy_parameter_advice(
+        cls,
+        price: float,
+        trend: dict[str, Any],
+        support_resistance: dict[str, Any],
+        summary: dict[str, Any],
+        timeframe: dict[str, Any],
+    ) -> dict[str, Any]:
+        atr_pct = cls._normalized_atr_pct(trend)
+        risk_level = summary.get("risk_level") or "中"
+        return {
+            "grid_trading": cls._grid_trading_parameters(
+                price,
+                trend,
+                support_resistance,
+                atr_pct,
+                risk_level,
+                timeframe,
+            ),
+            "martingale_contract": cls._martingale_contract_parameters(
+                price,
+                trend,
+                atr_pct,
+                risk_level,
+                timeframe,
+            ),
+            "disclaimer": "参数为分析快照下的保守配置草稿，不会自动下单；保存策略前需按账户资金、交易所限制和个人风险重新确认。",
+        }
+
+    @classmethod
+    def _grid_trading_parameters(
+        cls,
+        price: float,
+        trend: dict[str, Any],
+        support_resistance: dict[str, Any],
+        atr_pct: float,
+        risk_level: str,
+        timeframe: dict[str, Any],
+    ) -> dict[str, Any]:
+        support = cls._nearest_price(support_resistance.get("support_levels"))
+        resistance = cls._nearest_price(support_resistance.get("resistance_levels"))
+        half_range_pct = cls._clamp(atr_pct * 2.2, 1.5, 8.0)
+        max_half_range_pct = cls._clamp(half_range_pct * 2.2, 4.0, 14.0)
+
+        lower = support if support and support < price else price * (1 - half_range_pct / 100)
+        upper = resistance if resistance and resistance > price else price * (1 + half_range_pct / 100)
+        lower_distance_pct = (price - lower) / price * 100 if price else 0
+        upper_distance_pct = (upper - price) / price * 100 if price else 0
+        if lower_distance_pct < half_range_pct or lower_distance_pct > max_half_range_pct:
+            lower = price * (1 - half_range_pct / 100)
+        if upper_distance_pct < half_range_pct or upper_distance_pct > max_half_range_pct:
+            upper = price * (1 + half_range_pct / 100)
+        if lower <= 0 or upper <= lower:
+            lower = price * 0.97
+            upper = price * 1.03
+
+        range_width_pct = (upper - lower) / price * 100 if price else 0
+        target_spacing_pct = cls._clamp(atr_pct * 0.45, 0.3, 1.2)
+        grid_count = int(round(cls._clamp(range_width_pct / target_spacing_pct, 6, 80)))
+        spacing_pct = range_width_pct / grid_count if grid_count else None
+        buffer_pct = cls._clamp(atr_pct, 0.8, 3.0)
+        leverage = cls._conservative_leverage(risk_level, atr_pct, cap=3)
+
+        if risk_level in {"高", "极高"}:
+            suitability = "不建议"
+        elif trend.get("direction") == "震荡" and not timeframe.get("has_conflict"):
+            suitability = "适合"
+        else:
+            suitability = "谨慎"
+
+        mode = {
+            "偏多": "偏多低吸网格",
+            "偏空": "偏空反弹网格",
+        }.get(trend.get("direction"), "中性区间网格")
+        return {
+            "suitability": suitability,
+            "mode": mode,
+            "lower_price": cls._round_price(lower),
+            "upper_price": cls._round_price(upper),
+            "price_range": [cls._round_price(lower), cls._round_price(upper)],
+            "grid_count": grid_count,
+            "grid_spacing_pct": round(spacing_pct, 2) if spacing_pct is not None else None,
+            "grid_spacing_price": cls._round_price((upper - lower) / grid_count) if grid_count else None,
+            "leverage": leverage,
+            "margin_mode": "cross",
+            "stop_lower_price": cls._round_price(lower * (1 - buffer_pct / 100)),
+            "stop_upper_price": cls._round_price(upper * (1 + buffer_pct / 100)),
+            "range_basis": "最近支撑压力位 + 1H ATR 波动率",
+            "notes": [
+                "价格离开区间或 1H 趋势单边加速时停止补单。",
+                "每格资金建议等额分配，单格成交额按账户预算自行缩放。",
+            ],
+        }
+
+    @classmethod
+    def _martingale_contract_parameters(
+        cls,
+        price: float,
+        trend: dict[str, Any],
+        atr_pct: float,
+        risk_level: str,
+        timeframe: dict[str, Any],
+    ) -> dict[str, Any]:
+        direction = {
+            "偏多": "long",
+            "偏空": "short",
+        }.get(trend.get("direction"), "both")
+        direction_label = {
+            "long": "只做多",
+            "short": "只做空",
+            "both": "双向",
+        }[direction]
+
+        if risk_level in {"高", "极高"} or trend.get("atr_level") == "高" or timeframe.get("has_conflict"):
+            cycle, bar = "short", "1H"
+        elif timeframe.get("conclusion") in {"共振偏多", "共振偏空"} and risk_level == "低" and atr_pct < 1.2:
+            cycle, bar = "long", "1D"
+        else:
+            cycle, bar = "medium", "4H"
+
+        add_trigger_pct = round(cls._clamp(atr_pct * 0.85, 0.6, 4.0), 2)
+        take_profit_pct = round(cls._clamp(add_trigger_pct * 0.45, 0.3, 1.8), 2)
+        if risk_level in {"高", "极高"} or atr_pct >= 2.5:
+            max_add_count = 3
+        elif risk_level == "中" or atr_pct >= 1.3:
+            max_add_count = 4
+        else:
+            max_add_count = 5
+
+        initial_margin = 20.0
+        add_margin = 20.0
+        max_position = initial_margin + add_margin * max_add_count
+        hard_stop_pct = round(cls._clamp(add_trigger_pct * (max_add_count + 2), 6.0, 20.0), 2)
+        leverage = cls._conservative_leverage(risk_level, atr_pct, cap=3)
+        suitability = "不建议" if risk_level == "极高" else "谨慎" if risk_level == "高" else "可观察"
+        return {
+            "suitability": suitability,
+            "cycle": cycle,
+            "bar": bar,
+            "direction": direction,
+            "direction_label": direction_label,
+            "add_trigger_type": "pct",
+            "add_trigger_value": add_trigger_pct,
+            "add_trigger_price_delta": cls._round_price(price * add_trigger_pct / 100),
+            "take_profit_type": "pct",
+            "take_profit_value": take_profit_pct,
+            "take_profit_price_delta": cls._round_price(price * take_profit_pct / 100),
+            "initial_margin_usdt": initial_margin,
+            "add_margin_usdt": add_margin,
+            "max_add_count": max_add_count,
+            "max_position_usdt": max_position,
+            "leverage": leverage,
+            "hard_stop_pct": hard_stop_pct,
+            "fee_rate": 0.0005,
+            "slippage_pct": 0.02,
+            "risk": {
+                "max_concurrent": 1,
+                "max_daily_per_symbol": 2 if risk_level in {"高", "极高"} else 3,
+                "max_daily_loss_pct": 2.0 if risk_level in {"高", "极高"} else 3.0,
+            },
+            "notes": [
+                "保证金为模板值，保存策略前按账户资金等比例缩放。",
+                "补仓后实际强平价以 OKX 持仓返回值为准。",
+            ],
+        }
+
     @staticmethod
     def _volatility_warning(df: pd.DataFrame) -> dict[str, Any]:
         if df.empty or len(df) < 2:
@@ -1440,3 +1615,40 @@ class PerpetualAnalysisEngine:
     @staticmethod
     def _clamp(value: float, low: float, high: float) -> float:
         return max(low, min(high, value))
+
+    @classmethod
+    def _normalized_atr_pct(cls, trend: dict[str, Any]) -> float:
+        value = cls._safe_float(trend.get("atr_pct"))
+        if value is None or value <= 0:
+            return 1.0
+        return cls._clamp(value, 0.2, 8.0)
+
+    @classmethod
+    def _nearest_price(cls, levels: list[dict[str, Any]] | None) -> float | None:
+        if not levels:
+            return None
+        for level in levels:
+            price = cls._safe_float(level.get("price"))
+            if price is not None and price > 0:
+                return price
+        return None
+
+    @staticmethod
+    def _round_price(value: float | None) -> float | None:
+        if value is None:
+            return None
+        if value >= 100:
+            return round(value, 2)
+        if value >= 1:
+            return round(value, 4)
+        if value >= 0.01:
+            return round(value, 6)
+        return round(value, 8)
+
+    @staticmethod
+    def _conservative_leverage(risk_level: str, atr_pct: float, *, cap: int) -> int:
+        if risk_level in {"高", "极高"} or atr_pct >= 2.5:
+            return 1
+        if risk_level == "中" or atr_pct >= 1.2:
+            return min(2, cap)
+        return min(3, cap)

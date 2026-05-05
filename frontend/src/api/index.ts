@@ -60,6 +60,16 @@ export const getStrategyPositions = (id: string) => api.get(`/strategies/${id}/p
 export const getStrategySignals = (id: string, limit = 200) =>
   api.get(`/strategies/${id}/signals`, { params: { limit } })
 export const getStrategyPnl = (id: string) => api.get(`/strategies/${id}/pnl`)
+export const generateMartingaleParams = (data: any) => api.post('/martingale/params/generate', data)
+export const runMartingaleBacktest = (data: any) => api.post('/backtests/martingale', data, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
+export const downloadBacktestCandles = (data: any) =>
+  api.post('/backtests/candles/download', data, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
+export const getBacktestCandleCoverage = (params: any) =>
+  api.get('/backtests/candles/coverage', { params })
+export const getMartingaleBacktestRecords = (params: any = {}) =>
+  api.get('/backtests/martingale/records', { params })
+export const getMartingaleBacktestRecord = (id: number | string) =>
+  api.get(`/backtests/martingale/records/${id}`)
 
 // ═══════════════════════════════════════════
 // 市场

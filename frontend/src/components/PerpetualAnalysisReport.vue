@@ -7,6 +7,9 @@ const triggeredRules = computed(() => {
   return (props.analysis?.quant_rules || []).filter((rule: any) => rule.triggered)
 })
 
+const gridTradingAdvice = computed(() => props.analysis?.strategy_parameter_advice?.grid_trading || null)
+const martingaleAdvice = computed(() => props.analysis?.strategy_parameter_advice?.martingale_contract || null)
+
 function formatPrice(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
   if (value >= 100) return value.toLocaleString('en-US', { maximumFractionDigits: 2 })
@@ -27,6 +30,26 @@ function formatPct(value: number | null | undefined) {
 function formatRate(value: number | null | undefined) {
   if (value === null || value === undefined) return '-'
   return `${(value * 100).toFixed(4)}%`
+}
+
+function formatUsdt(value: number | null | undefined) {
+  if (value === null || value === undefined) return '-'
+  return `${value.toLocaleString('en-US', { maximumFractionDigits: 2 })} USDT`
+}
+
+function formatPriceRange(lower: number | null | undefined, upper: number | null | undefined) {
+  return `${formatPrice(lower)} - ${formatPrice(upper)}`
+}
+
+function cycleLabel(cycle: string | null | undefined) {
+  if (cycle === 'short') return '短期'
+  if (cycle === 'long') return '长期'
+  return '中期'
+}
+
+function valueWithUnit(value: number | null | undefined, type: string | null | undefined) {
+  if (value === null || value === undefined) return '-'
+  return `${formatNumber(value)} ${type === 'usdt' ? 'U' : '%'}`
 }
 
 function scoreStatus(score: number) {
@@ -343,6 +366,52 @@ function riskClass(level: string) {
             <strong>{{ item.name }}</strong>
             <span>{{ item.reason }}</span>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="gridTradingAdvice || martingaleAdvice" class="section split-section">
+      <div v-if="gridTradingAdvice">
+        <div class="section-header inline">
+          <h2>网格交易参数</h2>
+          <el-tag size="small" effect="plain">{{ gridTradingAdvice.suitability }}</el-tag>
+        </div>
+        <div class="info-grid compact">
+          <div><span>价格区间</span><strong>{{ formatPriceRange(gridTradingAdvice.lower_price, gridTradingAdvice.upper_price) }}</strong></div>
+          <div><span>网格数</span><strong>{{ gridTradingAdvice.grid_count }} 格</strong></div>
+          <div><span>每格间距</span><strong>{{ formatNumber(gridTradingAdvice.grid_spacing_pct) }}% · {{ formatPrice(gridTradingAdvice.grid_spacing_price) }}</strong></div>
+          <div><span>杠杆倍数</span><strong>{{ gridTradingAdvice.leverage }}x</strong></div>
+          <div><span>网格模式</span><strong>{{ gridTradingAdvice.mode }}</strong></div>
+          <div><span>保证金模式</span><strong>{{ gridTradingAdvice.margin_mode }}</strong></div>
+          <div><span>下沿失效</span><strong>{{ formatPrice(gridTradingAdvice.stop_lower_price) }}</strong></div>
+          <div><span>上沿失效</span><strong>{{ formatPrice(gridTradingAdvice.stop_upper_price) }}</strong></div>
+        </div>
+        <p class="module-text">依据：{{ gridTradingAdvice.range_basis }}</p>
+        <div class="module-list">
+          <span v-for="item in (gridTradingAdvice.notes || [])" :key="item">{{ item }}</span>
+        </div>
+      </div>
+      <div v-if="martingaleAdvice">
+        <div class="section-header inline">
+          <h2>马丁格尔合约参数</h2>
+          <el-tag size="small" effect="plain">{{ martingaleAdvice.suitability }}</el-tag>
+        </div>
+        <div class="info-grid compact">
+          <div><span>周期</span><strong>{{ cycleLabel(martingaleAdvice.cycle) }} ({{ martingaleAdvice.bar }})</strong></div>
+          <div><span>方向</span><strong>{{ martingaleAdvice.direction_label }}</strong></div>
+          <div><span>跌/涨加仓</span><strong>{{ valueWithUnit(martingaleAdvice.add_trigger_value, martingaleAdvice.add_trigger_type) }} · {{ formatPrice(martingaleAdvice.add_trigger_price_delta) }}</strong></div>
+          <div><span>周期止盈</span><strong>{{ valueWithUnit(martingaleAdvice.take_profit_value, martingaleAdvice.take_profit_type) }} · {{ formatPrice(martingaleAdvice.take_profit_price_delta) }}</strong></div>
+          <div><span>初次保证金</span><strong>{{ formatUsdt(martingaleAdvice.initial_margin_usdt) }}</strong></div>
+          <div><span>加仓保证金</span><strong>{{ formatUsdt(martingaleAdvice.add_margin_usdt) }}</strong></div>
+          <div><span>最大加仓</span><strong>{{ martingaleAdvice.max_add_count }} 次</strong></div>
+          <div><span>投资额模板</span><strong>{{ formatUsdt(martingaleAdvice.max_position_usdt) }}</strong></div>
+          <div><span>杠杆倍数</span><strong>{{ martingaleAdvice.leverage }}x</strong></div>
+          <div><span>硬止损</span><strong>{{ formatNumber(martingaleAdvice.hard_stop_pct) }}%</strong></div>
+        </div>
+        <div class="module-list">
+          <span>单币每日最多 {{ martingaleAdvice.risk?.max_daily_per_symbol }} 次</span>
+          <span>日亏损上限 {{ formatNumber(martingaleAdvice.risk?.max_daily_loss_pct) }}%</span>
+          <span v-for="item in (martingaleAdvice.notes || [])" :key="item">{{ item }}</span>
         </div>
       </div>
     </section>

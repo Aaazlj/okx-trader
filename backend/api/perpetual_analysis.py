@@ -189,13 +189,12 @@ async def _load_history_candles(symbol: str, bar: str, since_ms: int | None, lim
     def load() -> list[Any]:
         params = {"inst_id": symbol, "bar": bar, "limit": limit}
         if since_ms is not None:
-            params["after"] = str(since_ms)
+            params["before"] = str(since_ms)
         candles = _client.get_history_candles(**params)
         if candles:
             return candles
         if since_ms is not None:
-            params.pop("after", None)
-            params["before"] = str(since_ms)
+            params.pop("before", None)
             return _client.get_history_candles(**params)
         return []
 

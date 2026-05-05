@@ -104,6 +104,16 @@ def test_perpetual_analysis_build_returns_p0_sections():
     assert result["risk_reward_analysis"]["current_price"] == 280.0
     assert len(result["role_advice"]) == 5
     assert "direction" in result["trading_plan"]
+    grid_advice = result["strategy_parameter_advice"]["grid_trading"]
+    martingale_advice = result["strategy_parameter_advice"]["martingale_contract"]
+    assert grid_advice["lower_price"] < result["summary"]["current_price"] < grid_advice["upper_price"]
+    assert grid_advice["grid_count"] >= 6
+    assert grid_advice["leverage"] >= 1
+    assert martingale_advice["direction"] in {"long", "short", "both"}
+    assert martingale_advice["max_position_usdt"] == (
+        martingale_advice["initial_margin_usdt"]
+        + martingale_advice["add_margin_usdt"] * martingale_advice["max_add_count"]
+    )
     assert any(rule["name"] == "均线多头排列" for rule in result["quant_rules"])
     assert result["ai_report"] is None
 
@@ -262,3 +272,68 @@ def test_analysis_history_replay_checks_key_level_hits():
     assert levels[("第一目标", "target", 115)]["hit"] is True
     assert levels[("第二目标", "target", 125)]["hit"] is False
     assert replay["summary"]["hit_levels"] >= 2
+
+
+def test_perpetual_analysis_replay_loads_candles_after_analysis_time(monkeypatch):
+    async def run():
+        from analysis.history import analysis_time_ms, init_analysis_history_table, save_analysis_record
+        from api import perpetual_analysis
+
+        class ReplayOKXClient(FakeOKXClient):
+            def __init__(self):
+                super().__init__()
+                self.history_calls = []
+
+            def get_history_candles(
+                self,
+                inst_id: str,
+                bar: str = "1m",
+                after: str | None = None,
+                before: str | None = None,
+                limit: int = 100,
+            ):
+                self.history_calls.append({
+                    "inst_id": inst_id,
+                    "bar": bar,
+                    "after": after,
+                    "before": before,
+                    "limit": limit,
+                })
+                if before:
+                    start_ts = int(before)
+                    return [
+                        [str(start_ts + 3_600_000), "100", "116", "98", "114", "12"],
+                        [str(start_ts + 7_200_000), "114", "126", "112", "124", "14"],
+                    ]
+                if after:
+                    start_ts = int(after)
+                    return [
+                        [str(start_ts - 7_200_000), "90", "95", "88", "92", "10"],
+                        [str(start_ts - 3_600_000), "92", "98", "91", "96", "11"],
+                    ]
+                return []
+
+        db = await aiosqlite.connect(":memory:")
+        db.row_factory = aiosqlite.Row
+        await init_analysis_history_table(db)
+
+        analysis = _history_analysis("BTC-USDT-SWAP", "2026-05-01 10:00:00", 72, 100)
+        record_id = await save_analysis_record(db, analysis)
+
+        async def fake_get_db():
+            return db
+
+        client = ReplayOKXClient()
+        monkeypatch.setattr(perpetual_analysis, "get_db", fake_get_db)
+        perpetual_analysis.set_client(client)
+
+        replay = await perpetual_analysis.replay_analysis_history(record_id, bar="1H", limit=100)
+
+        assert client.history_calls[0]["before"] == str(analysis_time_ms(analysis))
+        assert client.history_calls[0]["after"] is None
+        assert replay["bar_count"] == 2
+        assert all(item["ts"] >= analysis_time_ms(analysis) for item in replay["candles"])
+
+        await db.close()
+
+    asyncio.run(run())

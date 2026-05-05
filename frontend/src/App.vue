@@ -2,6 +2,7 @@
 import { onMounted, onUnmounted, computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import { getAuthStatus, login, setUnauthorizedHandler } from './api'
 import { useTradingStore } from './stores/trading'
 
@@ -106,6 +107,7 @@ function goBack() {
 </script>
 
 <template>
+  <el-config-provider :locale="zhCn">
   <div id="app">
     <div v-if="!authLoaded" class="auth-shell">
       <div class="auth-card auth-loading">
@@ -202,6 +204,7 @@ function goBack() {
       <router-view />
     </template>
   </div>
+  </el-config-provider>
 </template>
 
 <style scoped>

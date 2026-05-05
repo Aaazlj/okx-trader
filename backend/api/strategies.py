@@ -2,7 +2,7 @@
 策略管理 API — CRUD + 启停 + 交易对配置
 """
 import json
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from db.database import get_db
 from models import StrategyResponse, StrategyUpdate
@@ -112,6 +112,10 @@ async def get_strategy(strategy_id: str):
 async def update_strategy(strategy_id: str, update: StrategyUpdate):
     """更新策略配置"""
     db = await get_db()
+    current_cursor = await db.execute("SELECT * FROM strategies WHERE id = ?", (strategy_id,))
+    current_row = await current_cursor.fetchone()
+    if current_row is None:
+        raise HTTPException(status_code=404, detail="策略不存在")
 
     # 构建动态 SET 子句
     updates = {}
@@ -122,6 +126,12 @@ async def update_strategy(strategy_id: str, update: StrategyUpdate):
     if update.decision_mode is not None:
         updates["decision_mode"] = update.decision_mode
     if update.leverage is not None:
+        symbols = update.symbols if update.symbols is not None else json.loads(current_row["symbols"])
+        max_leverage = _max_leverage_for_symbols(symbols)
+        if update.leverage < 1:
+            raise HTTPException(status_code=400, detail="杠杆倍数不能小于 1x")
+        if update.leverage > max_leverage:
+            raise HTTPException(status_code=400, detail=f"当前交易对最大支持 {max_leverage}x 杠杆")
         updates["leverage"] = update.leverage
     if update.order_amount_usdt is not None:
         updates["order_amount_usdt"] = update.order_amount_usdt
@@ -152,6 +162,19 @@ async def update_strategy(strategy_id: str, update: StrategyUpdate):
     await db.commit()
 
     return await get_strategy(strategy_id)
+
+
+def _max_leverage_for_symbols(symbols: list[str] | None) -> int:
+    """返回多个交易对共同支持的最大杠杆；查询失败时使用保守上限 100x。"""
+    if not symbols or _client is None:
+        return 100
+    limits = []
+    for symbol in symbols:
+        try:
+            limits.append(_client.get_max_leverage(symbol))
+        except Exception:
+            limits.append(100)
+    return max(1, min(limits))
 
 
 @router.post("/{strategy_id}/start")
@@ -208,10 +231,19 @@ async def get_strategy_positions(strategy_id: str):
 
     # 获取实时价格
     price_map = {}
+    liq_price_map = {}
     if _client:
         try:
             tickers = _client.get_tickers()
             price_map = {t["inst_id"]: t["last"] for t in tickers if t.get("last")}
+        except Exception:
+            pass
+        try:
+            liq_price_map = {
+                p.get("instId"): float(p.get("liqPx", 0) or 0)
+                for p in _client.get_positions()
+                if p.get("instId")
+            }
         except Exception:
             pass
 
@@ -228,6 +260,7 @@ async def get_strategy_positions(strategy_id: str):
         sl = d.get("sl_price") or 0
         d["tp_distance_pct"] = round((tp - current) / current * 100, 2) if tp > 0 and current > 0 else None
         d["sl_distance_pct"] = round((sl - current) / current * 100, 2) if sl > 0 and current > 0 else None
+        d["liquidation_price"] = liq_price_map.get(symbol) or None
 
         # 持仓时长
         from api.positions import _parse_open_time

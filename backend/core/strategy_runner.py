@@ -12,6 +12,7 @@ from strategies.registry import get_strategy
 from core.trade_executor import TradeExecutor
 from core.risk_manager import RiskManager
 from core.position_monitor import PositionMonitor
+from core.martingale_manager import MartingaleManager
 from ws import ws_manager
 from utils.logger import get_logger
 
@@ -26,6 +27,7 @@ class StrategyRunner:
         self.executor = TradeExecutor(client)
         self.risk_manager = RiskManager()
         self.position_monitor = PositionMonitor(client, self.risk_manager)
+        self.martingale_manager = MartingaleManager(client, self.risk_manager)
         self.tasks: dict[str, asyncio.Task] = {}
         self._running = False
         # 仓位互斥锁: symbol -> strategy_id
@@ -115,11 +117,16 @@ class StrategyRunner:
             return
 
         strategy_type = row["strategy_type"]
+        is_martingale = strategy_type == "martingale_contract"
         symbols = json.loads(row["symbols"])
         decision_mode = row["decision_mode"]
+        if is_martingale:
+            decision_mode = "technical"
         params = json.loads(row["params"])
         leverage = row["leverage"]
         order_amount = row["order_amount_usdt"]
+        if is_martingale:
+            order_amount = params.get("initial_margin_usdt", order_amount)
         mgn_mode = row["mgn_mode"]
 
         strategy = get_strategy(strategy_type)
@@ -144,8 +151,18 @@ class StrategyRunner:
             # 检查是否已有持仓 → 更新 peak/trough
             positions = self.client.get_positions(inst_id=symbol)
             if positions:
-                await self._update_position_pnl(strategy_id, symbol, positions[0])
+                if is_martingale:
+                    await self.martingale_manager.evaluate(
+                        strategy_id=strategy_id,
+                        symbol=symbol,
+                        row=row,
+                        okx_pos=positions[0],
+                    )
+                else:
+                    await self._update_position_pnl(strategy_id, symbol, positions[0])
                 continue
+            if is_martingale:
+                await self.martingale_manager.cleanup_missing_position(strategy_id, symbol)
 
             try:
                 # 获取主周期 K 线
@@ -232,8 +249,20 @@ class StrategyRunner:
                         # 记录开仓到风控
                         self.risk_manager.record_open(strategy_id, symbol)
 
+                        if is_martingale and signal.get("martingale"):
+                            await self.martingale_manager.register_entry(
+                                strategy_id=strategy_id,
+                                symbol=symbol,
+                                direction=signal["direction"],
+                                fill_price=result["fill_price"],
+                                fill_sz=result["fill_sz"],
+                                leverage=leverage,
+                                base_order_usdt=order_amount,
+                                mgn_mode=result["mgn_mode"],
+                                params=scan_params,
+                            )
                         # managed_exit 策略注册到持仓监控器
-                        if signal.get("managed_exit"):
+                        elif signal.get("managed_exit"):
                             self.position_monitor.register(
                                 symbol=symbol,
                                 strategy_id=strategy_id,

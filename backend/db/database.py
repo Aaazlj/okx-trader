@@ -8,6 +8,7 @@ from pathlib import Path
 
 import config
 from analysis.history import init_analysis_history_table
+from strategies.martingale_contract import DEFAULT_MARTINGALE_PARAMS
 from utils.logger import get_logger
 
 logger = get_logger("Database")
@@ -119,6 +120,78 @@ async def _init_tables(db: aiosqlite.Connection):
             created_at TEXT DEFAULT (datetime('now')),
             FOREIGN KEY (strategy_id) REFERENCES strategies(id)
         );
+
+        CREATE TABLE IF NOT EXISTS martingale_states (
+            strategy_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            direction TEXT NOT NULL,
+            level INTEGER NOT NULL DEFAULT 1,
+            avg_price REAL NOT NULL,
+            total_quantity REAL NOT NULL,
+            total_order_usdt REAL NOT NULL,
+            base_order_usdt REAL NOT NULL,
+            leverage INTEGER NOT NULL,
+            mgn_mode TEXT NOT NULL DEFAULT 'cross',
+            params TEXT DEFAULT '{}',
+            status TEXT DEFAULT 'open',
+            entry_time TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (strategy_id, symbol),
+            FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS martingale_legs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            level INTEGER NOT NULL,
+            direction TEXT NOT NULL,
+            price REAL NOT NULL,
+            quantity REAL NOT NULL,
+            order_usdt REAL NOT NULL,
+            reason TEXT,
+            created_at TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (strategy_id) REFERENCES strategies(id)
+        );
+
+        CREATE TABLE IF NOT EXISTS backtest_candles (
+            symbol TEXT NOT NULL,
+            bar TEXT NOT NULL,
+            ts INTEGER NOT NULL,
+            open REAL NOT NULL,
+            high REAL NOT NULL,
+            low REAL NOT NULL,
+            close REAL NOT NULL,
+            vol REAL DEFAULT 0,
+            vol_ccy REAL DEFAULT 0,
+            vol_ccy_quote REAL DEFAULT 0,
+            confirm INTEGER DEFAULT 1,
+            source TEXT DEFAULT 'okx',
+            created_at TEXT DEFAULT (datetime('now')),
+            updated_at TEXT DEFAULT (datetime('now')),
+            PRIMARY KEY (symbol, bar, ts)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_backtest_candles_symbol_bar_ts
+            ON backtest_candles(symbol, bar, ts);
+
+        CREATE TABLE IF NOT EXISTS martingale_backtest_records (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            strategy_id TEXT DEFAULT 'martingale_contract',
+            symbol TEXT NOT NULL,
+            cycle TEXT NOT NULL,
+            bar TEXT NOT NULL,
+            start_ts INTEGER NOT NULL,
+            end_ts INTEGER NOT NULL,
+            candle_count INTEGER NOT NULL,
+            params_json TEXT NOT NULL,
+            summary_json TEXT NOT NULL,
+            result_json TEXT NOT NULL,
+            created_at TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_martingale_backtest_records_symbol_created
+            ON martingale_backtest_records(symbol, created_at DESC);
     """)
     await db.commit()
     await init_analysis_history_table(db)
@@ -135,6 +208,58 @@ async def _init_tables(db: aiosqlite.Connection):
     row = await cursor.fetchone()
     if row[0] == 0:
         await _seed_default_strategies(db)
+    else:
+        await _seed_missing_martingale_strategy(db)
+    await _migrate_martingale_params(db)
+
+
+async def _seed_missing_martingale_strategy(db: aiosqlite.Connection):
+    """兼容旧库：只补新增的马丁格尔策略，不覆盖已有策略配置。"""
+    await db.execute(
+        """INSERT OR IGNORE INTO strategies
+           (id, name, strategy_type, decision_mode, symbols, leverage,
+            order_amount_usdt, poll_interval, params)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            "martingale_contract",
+            "马丁格尔合约",
+            "martingale_contract",
+            "technical",
+            json.dumps(["BTC-USDT-SWAP"]),
+            3,
+            DEFAULT_MARTINGALE_PARAMS["initial_margin_usdt"],
+            60,
+            json.dumps(DEFAULT_MARTINGALE_PARAMS, ensure_ascii=False),
+        ),
+    )
+    await db.commit()
+
+
+async def _migrate_martingale_params(db: aiosqlite.Connection):
+    """把旧版马丁格尔参数收敛到新版简化字段。"""
+    from strategies.martingale_contract import normalize_martingale_params
+
+    cursor = await db.execute(
+        "SELECT id, params FROM strategies WHERE strategy_type = 'martingale_contract'"
+    )
+    rows = await cursor.fetchall()
+    for row in rows:
+        try:
+            raw_params = json.loads(row["params"] or "{}")
+        except (TypeError, json.JSONDecodeError):
+            raw_params = {}
+        params = normalize_martingale_params(raw_params)
+        await db.execute(
+            """UPDATE strategies
+               SET params = ?, order_amount_usdt = ?, updated_at = datetime('now')
+               WHERE id = ?""",
+            (
+                json.dumps(params, ensure_ascii=False),
+                params["initial_margin_usdt"],
+                row["id"],
+            ),
+        )
+    await db.commit()
 
 
 async def _seed_default_strategies(db: aiosqlite.Connection):
@@ -326,6 +451,17 @@ async def _seed_default_strategies(db: aiosqlite.Connection):
                 "tp_pct": 0.5,
                 "sl_pct": 0.4,
             }),
+        },
+        {
+            "id": "martingale_contract",
+            "name": "马丁格尔合约",
+            "strategy_type": "martingale_contract",
+            "decision_mode": "technical",
+            "symbols": json.dumps(["BTC-USDT-SWAP"]),
+            "leverage": 3,
+            "order_amount_usdt": DEFAULT_MARTINGALE_PARAMS["initial_margin_usdt"],
+            "poll_interval": 60,
+            "params": json.dumps(DEFAULT_MARTINGALE_PARAMS, ensure_ascii=False),
         },
         # ═══════════════════════════════════════════
         # ai-bian AI 驱动策略
