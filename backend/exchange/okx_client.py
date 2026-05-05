@@ -375,14 +375,17 @@ class OKXClient:
             return []
         return [p for p in result["data"] if float(p.get("pos", "0")) != 0]
 
-    def close_position(self, inst_id: str, td_mode: str = None) -> bool:
+    def close_position(self, inst_id: str, td_mode: str = None, pos_side: str = None) -> bool:
         """市价平仓"""
         td_mode = td_mode or config.DEFAULT_MGN_MODE
-        result = self.trade.close_positions(instId=inst_id, mgnMode=td_mode)
+        params = {"instId": inst_id, "mgnMode": td_mode}
+        if pos_side and pos_side != "net":
+            params["posSide"] = pos_side
+        result = self.trade.close_positions(**params)
         if result["code"] != "0":
             logger.error(f"平仓失败 {inst_id}: {result['msg']}")
             return False
-        logger.info(f"✅ 已市价平仓 {inst_id}")
+        logger.info(f"✅ 已市价平仓 {inst_id}{f' {pos_side}' if pos_side else ''}")
         return True
 
     def close_partial(

@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { Position } from '../stores/trading'
 
-defineProps<{ positions: Position[] }>()
+defineProps<{
+  positions: Position[]
+  closingKey?: string
+}>()
+
+const emit = defineEmits<{
+  (e: 'close', position: Position): void
+}>()
 
 function formatDuration(seconds: number): string {
   if (seconds <= 0) return '-'
@@ -16,6 +23,10 @@ function distLabel(pct: number | null, target: 'tp' | 'sl'): string {
   const arrow = target === 'tp' ? '↑' : '↓'
   return `${arrow}${Math.abs(pct).toFixed(1)}%`
 }
+
+function positionKey(pos: Position): string {
+  return `${pos.symbol}:${pos.pos_side || pos.direction}`
+}
 </script>
 
 <template>
@@ -24,12 +35,12 @@ function distLabel(pct: number | null, target: 'tp' | 'sl'): string {
     <div>暂无持仓</div>
   </div>
   <div v-else class="position-list">
-    <div v-for="pos in positions" :key="pos.symbol" class="position-item">
-      <div style="display: flex; align-items: center; gap: 12px">
+    <div v-for="pos in positions" :key="positionKey(pos)" class="position-item">
+      <div class="position-main">
         <span class="symbol">{{ pos.symbol.replace('-USDT-SWAP', '') }}</span>
         <span class="direction" :class="pos.direction">{{ pos.direction }}</span>
       </div>
-      <div style="display: flex; align-items: center; gap: 16px; font-size: 12px; flex-wrap: wrap">
+      <div class="position-detail">
         <span style="color: var(--text-secondary)">
           {{ pos.quantity }} 张 · {{ pos.leverage }}x
         </span>
@@ -54,6 +65,16 @@ function distLabel(pct: number | null, target: 'tp' | 'sl'): string {
         <span style="color: var(--text-muted)">
           {{ formatDuration(pos.holding_seconds) }}
         </span>
+        <el-button
+          class="position-close-btn"
+          type="danger"
+          size="small"
+          :loading="closingKey === positionKey(pos)"
+          @click="emit('close', pos)"
+        >
+          <el-icon><Delete /></el-icon>
+          平仓
+        </el-button>
       </div>
     </div>
   </div>

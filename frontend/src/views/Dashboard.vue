@@ -1,10 +1,60 @@
 <script setup lang="ts">
-import { useTradingStore } from '../stores/trading'
+import { computed, ref } from 'vue'
+import { ElMessage } from 'element-plus'
+import { closePosition } from '../api'
+import { useTradingStore, type Position } from '../stores/trading'
 import StrategyCard from '../components/StrategyCard.vue'
 import PositionList from '../components/PositionList.vue'
 import LogViewer from '../components/LogViewer.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 const store = useTradingStore()
+const closeDialogVisible = ref(false)
+const pendingClosePosition = ref<Position | null>(null)
+const closingKey = ref('')
+
+const closeDescription = computed(() => {
+  const pos = pendingClosePosition.value
+  if (!pos) return ''
+  const pnl = `${pos.unrealized_pnl >= 0 ? '+' : ''}${pos.unrealized_pnl.toFixed(4)} USDT`
+  return `${pos.symbol} · ${pos.direction} · ${pos.quantity} 张 · 未实现盈亏 ${pnl}`
+})
+
+function positionKey(pos: Position): string {
+  return `${pos.symbol}:${pos.pos_side || pos.direction}`
+}
+
+function closeRequestSide(pos: Position): string {
+  return pos.pos_side && pos.pos_side !== 'net' ? pos.pos_side : pos.direction
+}
+
+function requestClosePosition(pos: Position) {
+  pendingClosePosition.value = pos
+  closeDialogVisible.value = true
+}
+
+async function confirmClosePosition() {
+  if (!pendingClosePosition.value) return
+
+  const pos = pendingClosePosition.value
+  closingKey.value = positionKey(pos)
+  try {
+    await closePosition(pos.symbol, closeRequestSide(pos))
+    ElMessage.success(`${pos.symbol} 已提交市价平仓`)
+    closeDialogVisible.value = false
+    pendingClosePosition.value = null
+    await Promise.allSettled([
+      store.fetchPositions(),
+      store.fetchAccount(),
+      store.fetchTrades(),
+      store.fetchStrategiesStats(),
+    ])
+  } catch (e: any) {
+    ElMessage.error(e.response?.data?.detail || '平仓失败')
+  } finally {
+    closingKey.value = ''
+  }
+}
 </script>
 
 <template>
@@ -66,7 +116,11 @@ const store = useTradingStore()
         <h2>📊 当前持仓</h2>
       </div>
       <div class="section-body">
-        <PositionList :positions="store.positions" />
+        <PositionList
+          :positions="store.positions"
+          :closing-key="closingKey"
+          @close="requestClosePosition"
+        />
       </div>
     </div>
 
@@ -82,5 +136,16 @@ const store = useTradingStore()
         <LogViewer :logs="store.logs" />
       </div>
     </div>
+
+    <ConfirmDialog
+      v-model="closeDialogVisible"
+      title="手动平仓"
+      message="会向 OKX 提交市价全平该持仓，确认继续？"
+      :description="closeDescription"
+      confirm-text="平仓"
+      danger
+      :loading="Boolean(closingKey)"
+      @confirm="confirmClosePosition"
+    />
   </div>
 </template>

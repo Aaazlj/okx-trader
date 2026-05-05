@@ -5,7 +5,8 @@ import time
 import traceback
 from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from db.database import get_db
 from exchange.okx_client import OKXClient
@@ -16,6 +17,10 @@ logger = get_logger("API.positions")
 router = APIRouter(prefix="/api/positions", tags=["positions"])
 
 _client: OKXClient | None = None
+
+
+class ClosePositionRequest(BaseModel):
+    pos_side: str | None = None
 
 
 def set_client(client: OKXClient):
@@ -34,6 +39,13 @@ def _parse_open_time(raw: str) -> float:
         return dt.replace(tzinfo=timezone(timedelta(hours=8))).timestamp()
     except Exception:
         return 0
+
+
+def _position_direction(position: dict) -> str:
+    pos_side = (position.get("posSide") or "").lower()
+    if pos_side in {"long", "short"}:
+        return pos_side
+    return "long" if float(position.get("pos", 0) or 0) > 0 else "short"
 
 
 @router.get("")
@@ -312,7 +324,7 @@ async def get_positions():
 
             result.append({
                 "symbol": symbol,
-                "direction": "long" if float(p.get("pos", 0)) > 0 else "short",
+                "direction": _position_direction(p),
                 "quantity": abs(float(p.get("pos", 0))),
                 "entry_price": entry,
                 "current_price": current,
@@ -320,6 +332,7 @@ async def get_positions():
                 "leverage": int(p.get("lever", 0) or 0),
                 "liquidation_price": float(p.get("liqPx", 0) or 0) or None,
                 "margin_mode": p.get("mgnMode", ""),
+                "pos_side": p.get("posSide") or None,
                 "tp_price": tp or None,
                 "sl_price": sl or None,
                 "tp_distance_pct": tp_dist,
@@ -331,3 +344,45 @@ async def get_positions():
     except Exception as e:
         logger.error(f"获取持仓失败: {e}\n{traceback.format_exc()}")
         return []
+
+
+@router.post("/{symbol}/close")
+async def close_position(symbol: str, request: ClosePositionRequest | None = None):
+    """手动市价全平指定持仓。"""
+    if _client is None:
+        raise HTTPException(status_code=503, detail="OKX 客户端未初始化")
+
+    symbol = symbol.upper()
+    try:
+        okx_positions = _client.get_positions(inst_id=symbol)
+    except Exception as e:
+        logger.error(f"查询持仓失败 {symbol}: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=502, detail="查询 OKX 持仓失败")
+
+    if not okx_positions:
+        raise HTTPException(status_code=404, detail="当前没有该交易对持仓")
+
+    requested_pos_side = ((request.pos_side if request else None) or "").lower()
+    if requested_pos_side:
+        candidates = [
+            p for p in okx_positions
+            if (p.get("posSide") or "").lower() == requested_pos_side
+            or _position_direction(p) == requested_pos_side
+        ]
+        if not candidates:
+            raise HTTPException(status_code=404, detail="当前没有该方向持仓")
+    else:
+        candidates = okx_positions
+
+    if len(candidates) > 1:
+        raise HTTPException(status_code=400, detail="存在多个方向持仓，请指定平仓方向")
+
+    position = candidates[0]
+    margin_mode = position.get("mgnMode") or None
+    pos_side = position.get("posSide") or None
+    success = _client.close_position(symbol, margin_mode, pos_side)
+    if not success:
+        raise HTTPException(status_code=502, detail="平仓失败，请查看后端日志")
+
+    logger.info(f"🧾 手动平仓已提交 | {symbol} | mgnMode={margin_mode} | posSide={pos_side}")
+    return {"message": "已提交市价平仓", "symbol": symbol, "pos_side": pos_side}

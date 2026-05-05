@@ -27,6 +27,7 @@ export interface Position {
   unrealized_pnl: number
   leverage: number
   margin_mode: string
+  pos_side: string | null
   tp_price: number | null
   sl_price: number | null
   tp_distance_pct: number | null

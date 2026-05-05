@@ -27,6 +27,7 @@ const recordsLoading = ref(false)
 const result = ref<any>(null)
 const coverage = ref<any>(null)
 const records = ref<any[]>([])
+const HOUR_MS = 60 * 60 * 1000
 const dateRange = ref<[Date, Date]>([
   new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
   new Date(),
@@ -199,11 +200,22 @@ function coverageStatus() {
   return coverage.value.missing_reason || `缓存不足：已缓存 ${coverage.value.cached_count} 根`
 }
 
-function setQuickRange(days: number) {
+function currentHourStart() {
+  const end = new Date()
+  end.setMinutes(0, 0, 0)
+  return end
+}
+
+function setQuickRangeHours(hours: number) {
+  const end = currentHourStart()
   dateRange.value = [
-    new Date(Date.now() - days * 24 * 60 * 60 * 1000),
-    new Date(),
+    new Date(end.getTime() - hours * HOUR_MS),
+    end,
   ]
+}
+
+function setQuickRange(days: number) {
+  setQuickRangeHours(days * 24)
 }
 
 const resizeHandler = () => chart?.resize()
@@ -268,6 +280,9 @@ watch([() => form.value.symbol, () => form.value.cycle], () => {
       </label>
     </div>
     <div class="quick-ranges">
+      <el-button size="small" @click="setQuickRangeHours(4)">近4h</el-button>
+      <el-button size="small" @click="setQuickRangeHours(8)">近8h</el-button>
+      <el-button size="small" @click="setQuickRangeHours(12)">近12h</el-button>
       <el-button size="small" @click="setQuickRange(1)">近1天</el-button>
       <el-button size="small" @click="setQuickRange(3)">近3天</el-button>
       <el-button size="small" @click="setQuickRange(7)">近7天</el-button>

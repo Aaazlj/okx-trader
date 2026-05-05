@@ -43,6 +43,8 @@ export const login = (password: string) => api.post('/auth/login', { password })
 
 export const getBalance = () => api.get('/account/balance')
 export const getPositions = () => api.get('/positions')
+export const closePosition = (symbol: string, posSide?: string | null) =>
+  api.post(`/positions/${encodeURIComponent(symbol)}/close`, { pos_side: posSide })
 
 // ═══════════════════════════════════════════
 // 策略
