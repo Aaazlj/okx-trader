@@ -62,8 +62,8 @@ export const getStrategyPositions = (id: string) => api.get(`/strategies/${id}/p
 export const getStrategySignals = (id: string, limit = 200) =>
   api.get(`/strategies/${id}/signals`, { params: { limit } })
 export const getStrategyPnl = (id: string) => api.get(`/strategies/${id}/pnl`)
-export const generateMartingaleParams = (data: any) => api.post('/martingale/params/generate', data)
-export const generateContractGridParams = (data: any) => api.post('/contract-grid/params/generate', data)
+export const generateMartingaleParams = (data: any) => api.post('/martingale/params/generate', data, { timeout: 60000 })
+export const generateContractGridParams = (data: any) => api.post('/contract-grid/params/generate', data, { timeout: 60000 })
 export const runMartingaleBacktest = (data: any) => api.post('/backtests/martingale', data, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
 export const runContractGridBacktest = (data: any) => api.post('/backtests/contract-grid', data, { timeout: PERPETUAL_ANALYSIS_TIMEOUT_MS })
 export const downloadBacktestCandles = (data: any) =>
