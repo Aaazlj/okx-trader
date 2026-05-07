@@ -20,7 +20,7 @@ DEFAULT_CONTRACT_GRID_PARAMS: dict[str, Any] = {
     "grid_count": 20,
     "total_margin_usdt": 300.0,
     "leverage": 3,
-    "mgn_mode": "cross",
+    "mgn_mode": "isolated",
     "stop_lower_price": 0.0,
     "stop_upper_price": 0.0,
     "fee_rate": 0.0005,
@@ -82,7 +82,7 @@ def normalize_contract_grid_params(params: dict | None) -> dict[str, Any]:
         normalized["grid_mode"] if normalized.get("grid_mode") in _VALID_GRID_MODES else "neutral"
     )
     normalized["mgn_mode"] = (
-        normalized["mgn_mode"] if normalized.get("mgn_mode") in _VALID_MARGIN_MODES else "cross"
+        normalized["mgn_mode"] if normalized.get("mgn_mode") in _VALID_MARGIN_MODES else "isolated"
     )
 
     for key, (min_val, max_val, caster) in _RANGES.items():

@@ -488,7 +488,7 @@ leverage, mgn_mode, stop_lower_price, stop_upper_price, fee_rate, slippage_pct, 
 - stop_lower_price 必须低于 lower_price，stop_upper_price 必须高于 upper_price。
 - grid_count 建议 8-80，风险越高网格数越少。
 - leverage 建议 1-5，风险越高杠杆越低。
-- mgn_mode 默认 "cross"，也可输出 "isolated"。
+- mgn_mode 默认 "isolated"（逐仓），也可输出 "cross"（全仓）。
 - total_margin_usdt 不应明显超过输入的 total_margin_usdt。
 - risk 必须包含 max_concurrent, max_daily_per_symbol, max_daily_loss_pct。
 - 不要输出说明文字。

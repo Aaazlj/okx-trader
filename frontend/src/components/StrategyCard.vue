@@ -60,7 +60,7 @@ function defaultContractGridParams() {
     grid_count: 20,
     total_margin_usdt: 300,
     leverage: 3,
-    mgn_mode: 'cross',
+    mgn_mode: 'isolated',
     stop_lower_price: 0,
     stop_upper_price: 0,
     fee_rate: 0.0005,
@@ -140,7 +140,7 @@ function syncContractGridBudget() {
   if (!isContractGrid.value) return
   editForm.value.params.total_margin_usdt = Number(editForm.value.params.total_margin_usdt || 0)
   editForm.value.params.leverage = Number(editForm.value.leverage || 1)
-  editForm.value.params.mgn_mode = editForm.value.params.mgn_mode || 'cross'
+  editForm.value.params.mgn_mode = editForm.value.params.mgn_mode || 'isolated'
   editForm.value.order_amount_usdt = editForm.value.params.total_margin_usdt
 }
 

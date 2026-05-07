@@ -54,6 +54,6 @@ DB_PATH = DATA_DIR / "okx_trader.db"
 # ═══════════════════════════════════════════
 DEFAULT_LEVERAGE = 10
 DEFAULT_ORDER_AMOUNT_USDT = 50
-DEFAULT_MGN_MODE = "cross"
+DEFAULT_MGN_MODE = "isolated"
 DEFAULT_POLL_INTERVAL = 5  # 秒
 CANDLE_FETCH_LIMIT = 500
