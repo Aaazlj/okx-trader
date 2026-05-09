@@ -32,10 +32,17 @@ class StrategyRunner:
         self._running = False
         # 仓位互斥锁: symbol -> strategy_id
         self._symbol_locks: dict[str, str] = {}
+        # 下单失败冷却: symbol -> cooldown_until (timestamp)
+        self._failure_cooldown: dict[str, float] = {}
+        self._failure_cooldown_sec = 120  # 失败后冷却 2 分钟
 
     async def start(self):
         """启动所有激活策略"""
         self._running = True
+
+        # 恢复风控状态
+        await self.risk_manager.load_state()
+
         db = await get_db()
         cursor = await db.execute("SELECT * FROM strategies WHERE is_active = 1")
         rows = await cursor.fetchall()
@@ -56,6 +63,7 @@ class StrategyRunner:
             task.cancel()
         self.tasks.clear()
         await self.position_monitor.stop()
+        await self.risk_manager.save_state()
         logger.info("策略调度器已停止")
 
     async def start_strategy(self, strategy_id: str):
@@ -131,6 +139,9 @@ class StrategyRunner:
         if is_martingale:
             order_amount = params.get("initial_margin_usdt", order_amount)
         mgn_mode = row["mgn_mode"]
+        sizing_method = row["sizing_method"] if "sizing_method" in row.keys() else "fixed"
+        risk_pct = row["risk_pct"] if "risk_pct" in row.keys() else 1.0
+        max_position_pct = row["max_position_pct"] if "max_position_pct" in row.keys() else 10.0
 
         strategy = get_strategy(strategy_type)
         if not strategy:
@@ -149,6 +160,11 @@ class StrategyRunner:
         for symbol in symbols:
             # 仓位互斥检查
             if symbol in self._symbol_locks and self._symbol_locks[symbol] != strategy_id:
+                continue
+
+            # 下单失败冷却检查
+            cooldown_until = self._failure_cooldown.get(symbol, 0)
+            if time.time() < cooldown_until:
                 continue
 
             # 检查是否已有持仓 → 更新 peak/trough
@@ -246,11 +262,15 @@ class StrategyRunner:
                         leverage=leverage,
                         order_amount=order_amount,
                         mgn_mode=mgn_mode,
+                        sizing_method=sizing_method,
+                        risk_pct=risk_pct,
+                        max_position_pct=max_position_pct,
                     )
 
                     if result:
                         # 记录开仓到风控
                         self.risk_manager.record_open(strategy_id, symbol)
+                        await self.risk_manager.save_state()
 
                         if is_martingale and signal.get("martingale"):
                             await self.martingale_manager.register_entry(
@@ -276,8 +296,11 @@ class StrategyRunner:
                                 exit_rules=signal.get("exit_rules", {}),
                             )
 
-                    # 锁定 symbol
-                    self._symbol_locks[symbol] = strategy_id
+                        # 锁定 symbol
+                        self._symbol_locks[symbol] = strategy_id
+                    else:
+                        # 下单失败，设置冷却避免反复重试
+                        self._failure_cooldown[symbol] = time.time() + self._failure_cooldown_sec
 
             except Exception as e:
                 logger.error(f"扫描 {symbol} 异常: {e}")

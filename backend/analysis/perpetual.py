@@ -14,6 +14,14 @@ import numpy as np
 import pandas as pd
 
 from indicators.technical import calc_atr, calc_boll, calc_ema, calc_macd, calc_rsi, calc_sma
+from indicators.kline_engine import KlineEngine
+from indicators.orderflow import compute_order_flow_score
+from indicators.smc_detector import SMCDetector
+from analysis.signal_scorer import SignalScorer
+from analysis.sentiment import SentimentFetcher
+from utils.logger import get_logger
+
+logger = get_logger("PerpetualAnalysis")
 
 BEIJING_TZ = timezone(timedelta(hours=8))
 
@@ -89,6 +97,17 @@ class PerpetualAnalysisEngine:
             lambda data: isinstance(data, list),
         ) or []
 
+        # Phase 1+3: 扩展指标、订单流、SMC、信号评分、情绪
+        extended_indicators = self._safe_call("kline_engine", lambda: KlineEngine().compute_extended(one_hour, mode="summary"))
+        order_flow = self._safe_call("orderflow", lambda: compute_order_flow_score(self.client, symbol))
+        smc_1h = candles.get("1H", pd.DataFrame())
+        smc_4h = candles.get("4H", pd.DataFrame())
+        smc_analysis = self._safe_call("smc", lambda: SMCDetector().detect(smc_1h, smc_4h))
+        signal_scorer = SignalScorer(self.client)
+        signal_score = self._safe_call("signal_score", lambda: signal_scorer.score(symbol))
+        sentiment_fetcher = SentimentFetcher(self.client)
+        sentiment_enhanced = self._safe_call("sentiment", lambda: sentiment_fetcher.get(symbol))
+
         trend = self._trend_analysis(one_hour)
         timeframe = self._timeframe_snapshot(candles)
         volume = self._volume_analysis(one_hour)
@@ -162,6 +181,11 @@ class PerpetualAnalysisEngine:
             "trading_plan": trading_plan,
             "strategy_parameter_advice": strategy_parameter_advice,
             "timeframe_snapshot": timeframe,
+            "extended_indicators": extended_indicators,
+            "order_flow_analysis": order_flow,
+            "smc_analysis": smc_analysis,
+            "signal_score": signal_score,
+            "sentiment_enhanced": sentiment_enhanced,
             "ai_report": None,
             "ai_report_error": None,
         }
@@ -197,6 +221,15 @@ class PerpetualAnalysisEngine:
             if attempt < retries - 1:
                 time.sleep(0.4 * (attempt + 1))
         return last_result
+
+    @staticmethod
+    def _safe_call(label: str, func, default=None):
+        try:
+            result = func()
+            return result if result is not None else default
+        except Exception as e:
+            logger.warning(f"{label} 分析失败: {e}")
+            return default
 
     def _trend_analysis(self, df: pd.DataFrame) -> dict[str, Any]:
         closes = df["close"].to_numpy(dtype=float)

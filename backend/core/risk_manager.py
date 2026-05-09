@@ -1,7 +1,8 @@
 """
 风控管理器 — 策略级风控状态管理
-内存维护，每日自动重置
+内存维护，每日自动重置。支持状态持久化（重启恢复）。
 """
+import json
 import time
 from datetime import datetime
 
@@ -133,3 +134,61 @@ class RiskManager:
             f"📊 风控 | {strategy_id} | {symbol} | "
             f"本笔: {pnl_pct:+.2f}% | 日累计: {daily_total:+.2f}%"
         )
+
+    async def save_state(self):
+        """将风控状态持久化到数据库（pause_until / daily_pnl / consecutive_losses / daily_trades）。"""
+        try:
+            from db.database import get_db
+            db = await get_db()
+            state = {
+                "pause_until": self._pause_until,
+                "daily_pnl": self._daily_pnl,
+                "consecutive_losses": self._consecutive_losses,
+                "daily_trades": self._daily_trades,
+                "last_reset_date": self._last_reset_date,
+            }
+            await db.execute(
+                """INSERT OR REPLACE INTO risk_state (key, value, updated_at)
+                   VALUES ('main', ?, datetime('now'))""",
+                (json.dumps(state, ensure_ascii=False),),
+            )
+            await db.commit()
+        except Exception as e:
+            logger.error(f"风控状态持久化失败: {e}")
+
+    async def load_state(self):
+        """从数据库恢复风控状态。"""
+        try:
+            from db.database import get_db
+            db = await get_db()
+            cursor = await db.execute(
+                "SELECT value FROM risk_state WHERE key = 'main'"
+            )
+            row = await cursor.fetchone()
+            if not row:
+                return
+
+            state = json.loads(row["value"])
+
+            # 只恢复当天的状态（跨日则丢弃）
+            saved_date = state.get("last_reset_date", "")
+            today = datetime.now().strftime("%Y-%m-%d")
+            if saved_date != today:
+                logger.info(f"风控状态跨日({saved_date}→{today})，丢弃旧状态")
+                return
+
+            self._pause_until = state.get("pause_until", {})
+            self._daily_pnl = state.get("daily_pnl", {})
+            self._consecutive_losses = state.get("consecutive_losses", {})
+            self._daily_trades = state.get("daily_trades", {})
+            self._last_reset_date = saved_date
+
+            # 清理过期的 pause_until
+            now = time.time()
+            self._pause_until = {
+                k: v for k, v in self._pause_until.items() if v > now
+            }
+
+            logger.info(f"风控状态已恢复 | 日累计PnL: {self._daily_pnl}")
+        except Exception as e:
+            logger.warning(f"风控状态恢复失败（使用空状态启动）: {e}")

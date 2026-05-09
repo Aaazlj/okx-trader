@@ -61,7 +61,10 @@ class OKXClient:
         if inst_id in self._ct_val_cache:
             return self._ct_val_cache[inst_id]
 
-        result = self.public.get_instruments(instType="SWAP", instId=inst_id)
+        try:
+            result = self.public.get_instruments(instType="SWAP", instId=inst_id)
+        except Exception as e:
+            raise ValueError(f"查询品种失败 {inst_id}: {e}") from e
         if result["code"] != "0" or not result["data"]:
             raise ValueError(f"品种不存在: {inst_id}")
 
@@ -235,11 +238,15 @@ class OKXClient:
         self, inst_id: str, lever: int, mgn_mode: str = "cross"
     ) -> bool:
         """设置杠杆倍数"""
-        result = self.account.set_leverage(
-            instId=inst_id, lever=str(lever), mgnMode=mgn_mode
-        )
+        try:
+            result = self.account.set_leverage(
+                instId=inst_id, lever=str(lever), mgnMode=mgn_mode
+            )
+        except Exception as e:
+            logger.error(f"设置杠杆异常 {inst_id}: {e}")
+            return False
         if result["code"] != "0":
-            logger.error(f"设置杠杆失败 {inst_id}: {result['msg']}")
+            logger.error(f"设置杠杆失败 {inst_id}: code={result['code']} msg={result['msg']}")
             return False
         logger.info(f"杠杆已设置: {inst_id} {lever}x ({mgn_mode})")
         return True
@@ -261,9 +268,17 @@ class OKXClient:
             "sz": sz,
         }
 
-        result = self.trade.place_order(**params)
+        try:
+            result = self.trade.place_order(**params)
+        except Exception as e:
+            logger.error(f"下单异常 {inst_id} {side} sz={sz} tdMode={td_mode}: {type(e).__name__}: {e}")
+            return None
+
         if result["code"] != "0":
-            logger.error(f"下单失败 {inst_id} {side}: {result['msg']}")
+            logger.error(
+                f"下单失败 {inst_id} {side} sz={sz} tdMode={td_mode}: "
+                f"code={result['code']} msg={result['msg']}"
+            )
             return None
 
         order_id = result["data"][0]["ordId"]
@@ -330,18 +345,22 @@ class OKXClient:
         """设置 OCO 保护单（止盈+止损）"""
         td_mode = td_mode or config.DEFAULT_MGN_MODE
 
-        result = self.trade.place_algo_order(
-            instId=inst_id,
-            tdMode=td_mode,
-            side=side,
-            ordType="oco",
-            sz=sz,
-            reduceOnly="true",
-            tpTriggerPx=self._format_price(tp_price),
-            tpOrdPx="-1",
-            slTriggerPx=self._format_price(sl_price),
-            slOrdPx="-1",
-        )
+        try:
+            result = self.trade.place_algo_order(
+                instId=inst_id,
+                tdMode=td_mode,
+                side=side,
+                ordType="oco",
+                sz=sz,
+                reduceOnly="true",
+                tpTriggerPx=self._format_price(tp_price),
+                tpOrdPx="-1",
+                slTriggerPx=self._format_price(sl_price),
+                slOrdPx="-1",
+            )
+        except Exception as e:
+            logger.error(f"设置止盈止损异常 {inst_id}: {e}")
+            return None
         if result.get("code") != "0":
             logger.error(
                 f"设置止盈止损失败 {inst_id}: code={result.get('code')} msg={result.get('msg', '')} "
@@ -381,7 +400,11 @@ class OKXClient:
         params = {"instId": inst_id, "mgnMode": td_mode}
         if pos_side and pos_side != "net":
             params["posSide"] = pos_side
-        result = self.trade.close_positions(**params)
+        try:
+            result = self.trade.close_positions(**params)
+        except Exception as e:
+            logger.error(f"平仓异常 {inst_id}: {e}")
+            return False
         if result["code"] != "0":
             logger.error(f"平仓失败 {inst_id}: {result['msg']}")
             return False
@@ -395,14 +418,18 @@ class OKXClient:
         td_mode = td_mode or config.DEFAULT_MGN_MODE
         # 平仓方向与持仓方向相反
         side = "buy" if direction == "short" else "sell"
-        result = self.trade.place_order(
-            instId=inst_id,
-            tdMode=td_mode,
-            side=side,
-            ordType="market",
-            sz=sz,
-            reduceOnly=True,
-        )
+        try:
+            result = self.trade.place_order(
+                instId=inst_id,
+                tdMode=td_mode,
+                side=side,
+                ordType="market",
+                sz=sz,
+                reduceOnly=True,
+            )
+        except Exception as e:
+            logger.error(f"部分平仓异常 {inst_id}: {e}")
+            return False
         if result.get("code") != "0":
             logger.error(f"部分平仓失败 {inst_id}: {result.get('msg', '')}")
             return False

@@ -60,11 +60,14 @@ async def _init_tables(db: aiosqlite.Connection):
             decision_mode TEXT DEFAULT 'technical',
             leverage INTEGER DEFAULT 10,
             order_amount_usdt REAL DEFAULT 50,
-            mgn_mode TEXT DEFAULT 'cross',
+            mgn_mode TEXT DEFAULT 'isolated',
             poll_interval INTEGER DEFAULT 5,
             params TEXT DEFAULT '{}',
             ai_min_confidence INTEGER DEFAULT 70,
             ai_prompt TEXT DEFAULT '',
+            sizing_method TEXT DEFAULT 'fixed',
+            risk_pct REAL DEFAULT 1.0,
+            max_position_pct REAL DEFAULT 10.0,
             created_at TEXT DEFAULT (datetime('now')),
             updated_at TEXT DEFAULT (datetime('now'))
         );
@@ -211,6 +214,12 @@ async def _init_tables(db: aiosqlite.Connection):
 
         CREATE INDEX IF NOT EXISTS idx_contract_grid_backtest_records_symbol_created
             ON contract_grid_backtest_records(symbol, created_at DESC);
+
+        CREATE TABLE IF NOT EXISTS risk_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT DEFAULT (datetime('now'))
+        );
     """)
     await db.commit()
     await init_analysis_history_table(db)
@@ -221,6 +230,11 @@ async def _init_tables(db: aiosqlite.Connection):
     await _ensure_column(db, "trades", "pnl_ratio", "REAL")
     await _ensure_column(db, "positions", "peak_pnl", "REAL DEFAULT 0")
     await _ensure_column(db, "positions", "trough_pnl", "REAL DEFAULT 0")
+
+    # 兼容旧库：给 strategies 表补充动态仓位管理列
+    await _ensure_column(db, "strategies", "sizing_method", "TEXT DEFAULT 'fixed'")
+    await _ensure_column(db, "strategies", "risk_pct", "REAL DEFAULT 1.0")
+    await _ensure_column(db, "strategies", "max_position_pct", "REAL DEFAULT 10.0")
 
     # 预置默认策略（如果不存在）
     cursor = await db.execute("SELECT COUNT(*) FROM strategies")

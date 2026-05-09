@@ -28,6 +28,7 @@ class ManagedPosition:
     mgn_mode: str = "cross"
     tp1_triggered: bool = False
     peak_pnl_pct: float = 0.0
+    trailing_active: bool = False  # 移动止损已激活
     exit_rules: dict = field(default_factory=dict)
 
 
@@ -153,7 +154,23 @@ class PositionMonitor:
                 await self._close_all(mp, pnl_pct, f"初始止损 {pnl_pct:.2f}%")
                 return
 
-        # ── 4. TP1：盈利达阈值，平 50% ──
+        # ── 4. 移动止损 ──
+        trailing_activation = rules.get("trailing_activation_pct")
+        trailing_callback = rules.get("trailing_callback_pct", 0.3)
+
+        if trailing_activation is not None:
+            if pnl_pct >= trailing_activation:
+                mp.trailing_active = True
+            if mp.trailing_active:
+                drawdown = mp.peak_pnl_pct - pnl_pct
+                if drawdown >= trailing_callback:
+                    await self._close_all(
+                        mp, pnl_pct,
+                        f"移动止损 (peak={mp.peak_pnl_pct:.2f}%, 回撤={drawdown:.2f}%)",
+                    )
+                    return
+
+        # ── 5. TP1：盈利达阈值，平 50% ──
         tp1_pct = rules.get("tp1_pct", 0.8)
         tp1_ratio = rules.get("tp1_ratio", 0.5)
         if not mp.tp1_triggered and pnl_pct >= tp1_pct:
@@ -178,7 +195,7 @@ class PositionMonitor:
                     })
             return
 
-        # ── 5. TP2：盈利达阈值，平剩余 ──
+        # ── 6. TP2：盈利达阈值，平剩余 ──
         tp2_pct = rules.get("tp2_pct", 1.5)
         if mp.tp1_triggered and pnl_pct >= tp2_pct:
             await self._close_all(mp, pnl_pct, f"TP2 止盈 {pnl_pct:.2f}%")
@@ -192,6 +209,7 @@ class PositionMonitor:
 
             # 通知风控
             self.risk_manager.record_close(mp.strategy_id, mp.symbol, pnl_pct)
+            await self.risk_manager.save_state()
 
             # 更新数据库交易记录
             await self._update_trade_record(mp, pnl_pct, reason)

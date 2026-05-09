@@ -190,7 +190,7 @@ class AIAnalyzer:
                             {"role": "user", "content": user_prompt},
                         ],
                         "temperature": 0.25,
-                        "max_tokens": 2600,
+                        "max_tokens": 4000,
                     },
                 )
 
@@ -337,7 +337,9 @@ class AIAnalyzer:
         return "\n".join(lines)
 
     def _build_user_prompt(
-        self, symbol: str, indicators: dict, strategy_name: str, custom_prompt: str
+        self, symbol: str, indicators: dict, strategy_name: str, custom_prompt: str,
+        extended: dict | None = None, order_flow: dict | None = None,
+        smc: dict | None = None, signal_score: dict | None = None,
     ) -> str:
         lines = [
             f"## 交易对: {symbol}",
@@ -348,6 +350,34 @@ class AIAnalyzer:
 
         for key, value in indicators.items():
             lines.append(f"- {key}: {value}")
+
+        if extended and not extended.get("error"):
+            lines.append("")
+            lines.append("## 扩展指标:")
+            for cat in ("trend", "momentum", "volume", "volatility"):
+                cat_data = extended.get(cat, {})
+                if cat_data:
+                    top_keys = list(cat_data.keys())[:8]
+                    for k in top_keys:
+                        lines.append(f"- {k}: {cat_data[k]}")
+
+        if order_flow and order_flow.get("score") is not None:
+            lines.append("")
+            lines.append(f"## 订单流评分: {order_flow['score']}/100 ({order_flow.get('verdict', 'N/A')})")
+            for sig in order_flow.get("signals", [])[:5]:
+                lines.append(f"- {sig[0]}: {sig[1]} ({sig[2]})")
+
+        if smc and smc.get("confidence"):
+            lines.append("")
+            lines.append(f"## SMC 置信度: {smc['confidence']}/100")
+            for ob in smc.get("order_blocks", [])[:3]:
+                lines.append(f"- OB: {ob.get('type')} {ob.get('low')}-{ob.get('high')}")
+            for fvg in smc.get("fair_value_gaps", [])[:3]:
+                lines.append(f"- FVG: {fvg.get('type')} {fvg.get('bottom')}-{fvg.get('top')}")
+
+        if signal_score and signal_score.get("composite_score") is not None:
+            lines.append("")
+            lines.append(f"## 信号评分: {signal_score['composite_score']} ({signal_score.get('label', '')})")
 
         if custom_prompt:
             lines.append("")
@@ -382,6 +412,11 @@ class AIAnalyzer:
             "quantRuleBreakdown": analysis.get("quant_rules"),
             "scorePanel": analysis.get("scores"),
             "dataQualityNotes": analysis.get("data_quality_notes"),
+            "extendedIndicators": analysis.get("extended_indicators"),
+            "orderFlowAnalysis": analysis.get("order_flow_analysis"),
+            "smcAnalysis": analysis.get("smc_analysis"),
+            "signalScore": analysis.get("signal_score"),
+            "sentimentEnhanced": analysis.get("sentiment_enhanced"),
         }
         structured_json = json.dumps(data, ensure_ascii=False, default=str)
         return f"""
@@ -414,16 +449,19 @@ class AIAnalyzer:
 七、成交量分析
 八、多空情绪分析
 九、订单簿深度分析
-十、机构行为判断
-十一、市场阶段识别
-十二、策略匹配
-十三、风险收益比
-十四、多角色交易建议
-十五、信号冲突与注意事项
-十六、网格与马丁格尔参数建议
-十七、综合评分说明
-十八、交易计划草稿
-十九、最终操作建议
+十、订单流分析（买卖力量、delta、大单检测）
+十一、Smart Money 结构（Order Block、FVG、流动性扫盘）
+十二、机构行为判断
+十三、市场阶段识别
+十四、策略匹配
+十五、风险收益比
+十六、多角色交易建议
+十七、信号冲突与注意事项
+十八、6 维信号评分（OI/多空比/资金费率/大户持仓/技术指标）
+十九、网格与马丁格尔参数建议
+二十、综合评分说明
+二十一、交易计划草稿
+二十二、最终操作建议
 
 【风险免责声明】
 本分析报告基于公开市场数据和量化模型推演，仅作为市场状态和风险参考，不构成任何形式的投资建议。加密货币市场波动剧烈，过往规律不代表未来表现，请根据自身风险承受能力谨慎决策，自行承担交易风险。
